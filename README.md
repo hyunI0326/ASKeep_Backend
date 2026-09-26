@@ -51,7 +51,7 @@ AI Answer
 
 # Tech Stack
 
-- Python
+- Python 3.13.13
 - FastAPI
 - PyMuPDF
 - Pydantic
@@ -174,6 +174,8 @@ git checkout feature/material-ai
 ---
 
 # 2. Python Environment
+
+Python **3.13.13** 버전을 사용합니다. (`.python-version` 참고)
 
 Python 가상환경 사용을 권장합니다.
 
