@@ -6,6 +6,7 @@ from sentence_transformers import SentenceTransformer
 from pgvector.psycopg import register_vector
 from pgvector import Vector
 import os
+from pathlib import Path
 from dotenv import load_dotenv
 from google import genai
 from google.genai.errors import ServerError
@@ -24,6 +25,16 @@ class SearchRequest(BaseModel):
     sessionId: int
     query: str
     limit: int = 5
+
+#업로드 폴더 밖의 경로 접근 차단
+def resolve_upload_path(file_path: str) -> Path:
+    upload_dir = Path(os.getenv("UPLOAD_DIR", "./uploads")).resolve()
+    path = Path(file_path).resolve()
+    if not path.is_relative_to(upload_dir):
+        raise HTTPException(status_code=400, detail="허용되지 않은 경로입니다.")
+    if path.suffix.lower() != ".pdf" or not path.is_file():
+        raise HTTPException(status_code=400, detail="PDF 파일이 아닙니다.")
+    return path
 
 # page별 text 분할
 def extract_pdf(file_path: str):
@@ -48,8 +59,8 @@ def split_text(text:str, chunk_size=1000, overlap=200):
         start+=chunk_size-overlap
     return chunks
 
-#chunk 저장
-def save_chunks(chunks):
+#chunk 저장 (같은 material_id의 기존 chunk는 삭제 후 다시 저장)
+def save_chunks(chunks, material_id: int):
     texts = [
         chunk["text"]
         for chunk in chunks
@@ -59,6 +70,10 @@ def save_chunks(chunks):
 
     with get_connection() as conn:
         with conn.cursor() as cursor:
+            cursor.execute(
+                "DELETE FROM material_chunks WHERE material_id = %s",
+                (material_id,)
+            )
             for chunk, embedding in zip(chunks, embeddings):
                 cursor.execute(
                     """
@@ -248,7 +263,7 @@ def health() :
 @app.post("/documents/process")
 def process_document(request: DocumentRequest):
     try:
-        pages = extract_pdf(request.filePath)
+        pages = extract_pdf(resolve_upload_path(request.filePath))
         result_chunk = []
         chunk_index = 0
         for page in pages:
@@ -266,13 +281,15 @@ def process_document(request: DocumentRequest):
                 })
                 chunk_index+=1
 
-        save_chunks(result_chunk)
+        save_chunks(result_chunk, request.materialId)
 
         return {
             "status": "success",
             "chunkCount": len(result_chunk)
         }
 
+    except HTTPException:
+        raise
     except Exception as e:
         print("ERROR:", type(e).__name__, str(e))
         raise HTTPException(status_code=500, detail=str(e))
