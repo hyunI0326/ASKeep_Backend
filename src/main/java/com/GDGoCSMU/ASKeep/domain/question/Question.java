@@ -55,10 +55,6 @@ public class Question extends BaseEntity {
         this.aiStatus = AiStatus.FAILED;
     }
 
-    public void skipAiProcessing() {   // 추가
-        this.aiStatus = AiStatus.SKIPPED;
-    }
-
     public void retryAiProcessing() {   // 추가
         if (this.aiStatus != AiStatus.FAILED) {
             throw new IllegalStateException("실패한 질문만 재시도할 수 있습니다.");
