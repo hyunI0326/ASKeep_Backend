@@ -28,18 +28,18 @@ public class Question extends BaseEntity {
     private StudySession session;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "user_id", nullable = false)   // 변경
+    @JoinColumn(name = "user_id", nullable = false)
     private User user;
 
-    @Column(name = "is_anonymous", nullable = false)   // 추가
+    @Column(name = "is_anonymous", nullable = false)
     private boolean anonymous;
 
     @Builder
-    public Question(String content, StudySession session, User user, boolean anonymous) {   // 변경
+    public Question(String content, StudySession session, User user, boolean anonymous) {
         this.content = content;
         this.session = session;
         this.user = user;
-        this.anonymous = anonymous;   // 추가
+        this.anonymous = anonymous;
         this.aiStatus = AiStatus.PENDING;
     }
 
@@ -55,7 +55,7 @@ public class Question extends BaseEntity {
         this.aiStatus = AiStatus.FAILED;
     }
 
-    public void retryAiProcessing() {   // 추가
+    public void retryAiProcessing() {
         if (this.aiStatus != AiStatus.FAILED) {
             throw new IllegalStateException("실패한 질문만 재시도할 수 있습니다.");
         }
