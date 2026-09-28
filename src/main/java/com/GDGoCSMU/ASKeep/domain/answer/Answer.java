@@ -24,18 +24,18 @@ public class Answer extends BaseEntity {
     private AnswerType type;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "author_id")   // 변경: 이름 변경 + AI 답변이면 비워둠
-    private User author;              // 변경: user → author
+    @JoinColumn(name = "author_id")
+    private User author;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "question_id", nullable = false)
     private Question question;
 
     @Builder
-    public Answer(String content, AnswerType type, Question question, User author) {   // 변경
+    public Answer(String content, AnswerType type, Question question, User author) {
         this.content = content;
         this.type = type;
         this.question = question;
-        this.author = author;   // 변경
+        this.author = author;
     }
 }
