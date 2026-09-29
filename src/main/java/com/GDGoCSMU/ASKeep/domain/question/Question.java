@@ -1,6 +1,5 @@
 package com.GDGoCSMU.ASKeep.domain.question;
 
-
 import com.GDGoCSMU.ASKeep.domain.common.BaseEntity;
 import com.GDGoCSMU.ASKeep.domain.session.StudySession;
 import com.GDGoCSMU.ASKeep.domain.user.domain.User;
@@ -29,23 +28,37 @@ public class Question extends BaseEntity {
     private StudySession session;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "user")
+    @JoinColumn(name = "user_id", nullable = false)
     private User user;
 
+    @Column(name = "is_anonymous", nullable = false)
+    private boolean anonymous;
+
     @Builder
-    public Question(String content, StudySession session, User user) {
+    public Question(String content, StudySession session, User user, boolean anonymous) {
         this.content = content;
         this.session = session;
         this.user = user;
+        this.anonymous = anonymous;
         this.aiStatus = AiStatus.PENDING;
     }
+
     public void startAiProcessing() {
         this.aiStatus = AiStatus.PROCESSING;
     }
+
     public void completeAiProcessing() {
         this.aiStatus = AiStatus.COMPLETED;
     }
+
     public void failAiProcessing() {
         this.aiStatus = AiStatus.FAILED;
+    }
+
+    public void retryAiProcessing() {
+        if (this.aiStatus != AiStatus.FAILED) {
+            throw new IllegalStateException("실패한 질문만 재시도할 수 있습니다.");
+        }
+        this.aiStatus = AiStatus.PENDING;
     }
 }
