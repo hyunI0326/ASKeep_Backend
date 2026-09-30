@@ -1,0 +1,14 @@
+spring:
+  application:
+    name: ASKeep
+  datasource:
+    url: jdbc:postgresql://localhost:5432/askeep
+    username: askeep
+    password: ${DB_PASSWORD:askeep}
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: true
+    properties:
+      hibernate:
+        format_sql: true

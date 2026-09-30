@@ -1,0 +1,15 @@
+services:
+  db:
+    image: pgvector/pgvector:pg17
+    container_name: askeep-db
+    environment:
+      POSTGRES_DB: askeep
+      POSTGRES_USER: askeep
+      POSTGRES_PASSWORD: askeep
+    ports:
+      - "5432:5432"
+    volumes:
+      - askeep-data:/var/lib/postgresql/data   # 컨테이너를 꺼도 데이터유지
+
+volumes:
+  askeep-data:
