@@ -1,123 +1,278 @@
 # ASKeep 프론트엔드 API 명세
 
-원격 `feature/user-auth`의 사용자·세션 API와 현재 자료·질문·답변 API를 통합한 기준입니다.
+현재 백엔드 구현 기준(2026-10-01)입니다. 아래 경로에는 공통 접두사 `/api/v1`를 생략했습니다.
 
-## 공통 규칙
+## 1. 공통 규칙
 
-- 기본 경로: `/api/v1`
-- 회원가입·로그인을 제외한 요청: `Authorization: Bearer {accessToken}`
-- 일반 요청과 응답: `Content-Type: application/json`
-- 업로드 요청: `multipart/form-data`, 파일 필드 이름 `file`
-- JWT: HS256, 기본 만료 3600초. 배포 시 32바이트 이상의 `JWT_SECRET` 설정
-- 날짜·시간: ISO 8601 LocalDateTime 문자열, 예: `2026-09-30T10:00:00`
+### 요청과 인증
 
-성공 응답은 `{"success":true,"data":...}`입니다. 본문이 없는 성공은 `{"success":true}`를 반환합니다. 오류는 다음 형식입니다.
+- 회원가입과 로그인을 제외한 모든 API는 `Authorization: Bearer {accessToken}` 헤더가 필요합니다.
+- JSON 본문을 보내는 요청은 `Content-Type: application/json`을 사용합니다. 자료 업로드만 `multipart/form-data`를 사용합니다.
+- 액세스 토큰은 HS256 JWT이며 기본 만료 시간은 3,600초입니다. 만료되면 다시 로그인해야 합니다. 토큰 갱신 API는 구현되어 있지 않습니다.
+- 날짜·시간은 시간대 정보가 없는 ISO 8601 문자열입니다. 예: `2026-10-01T10:30:00`.
+- 경로의 ID(`sessionId`, `materialId`, `questionId`, `answerId`)는 정수입니다.
+
+### 공통 응답
+
+데이터가 있는 성공 응답:
 
 ```json
-{"success":false,"error":{"code":"INVALID_INPUT","message":"입력값이 올바르지 않습니다."}}
+{
+  "success": true,
+  "data": {"id": 1}
+}
 ```
 
-목록 중 자료·질문은 `data`에 `{"items":[],"page":0,"size":20,"totalElements":0,"totalPages":0}` 형태가 담깁니다. `page`는 0부터 시작하고 `size`는 기본 20, 최대 100입니다.
+데이터가 없는 성공 응답(로그아웃·삭제):
 
-## 인증·사용자
+```json
+{"success": true}
+```
 
-| 기능 | 메서드·경로 | 요청 | 성공 상태·`data` |
+오류 응답:
+
+```json
+{
+  "success": false,
+  "error": {
+    "code": "INVALID_INPUT",
+    "message": "title: 공백일 수 없습니다"
+  }
+}
+```
+
+`error.message`는 상황에 따라 달라집니다. 필드 검증 오류는 현재 첫 번째 오류의 필드명과 메시지만 포함하며, 별도의 `fieldErrors` 객체는 없습니다.
+
+| HTTP 상태 | 대표 `error.code` | 의미 |
+|---:|---|---|
+| 400 | `INVALID_INPUT` | 요청 본문·쿼리·유효성 오류 |
+| 401 | `UNAUTHORIZED`, `LOGIN_FAILED`, `INVALID_TOKEN` | 미인증, 로그인 실패, 잘못된 토큰 |
+| 403 | `FORBIDDEN`, `NOT_SESSION_PRESENTER` | 해당 작업 권한 없음 |
+| 404 | `RESOURCE_NOT_FOUND`, `SESSION_NOT_FOUND`, `USER_NOT_FOUND` | 대상 없음 |
+| 409 | `CONFLICT`, `DUPLICATE_EMAIL`, 세션 상태 오류 코드 | 중복 또는 현재 상태에서 허용되지 않는 작업 |
+| 413 | HTTP 상태 문자열 | 파일 용량 초과 |
+| 415 | HTTP 상태 문자열 | PDF 형식 오류 |
+| 500 | `INTERNAL_ERROR` | 서버 오류 |
+
+### 목록과 비동기 처리
+
+자료·질문의 일반 목록은 `page`(기본 0), `size`(기본 20, 1~100)를 받습니다. `data`는 아래 형식입니다. 세션 목록과 답변 목록에는 이 페이지 형식을 사용하지 않습니다.
+
+```json
+{
+  "items": [],
+  "page": 0,
+  "size": 20,
+  "totalElements": 0,
+  "totalPages": 0
+}
+```
+
+자료 업로드와 질문 등록, AI 재시도는 `202 Accepted`를 반환한 뒤 AI 처리를 진행합니다. 반환 직후 상태가 `PENDING`이었다가 `PROCESSING`, `COMPLETED` 또는 `FAILED`로 바뀔 수 있으므로 상세·목록 API로 상태를 다시 조회하세요.
+
+## 2. 인증·사용자
+
+| 기능 | 메서드·경로 | 요청 본문 | 성공 |
 |---|---|---|---|
-| 회원가입 | `POST /users/auth/signup` | JSON: `email`, `password`(8~64자), `name`(최대 30자) | 201, 사용자 |
-| 로그인 | `POST /users/auth/login` | JSON: `email`, `password` | 200, 토큰·사용자 |
-| 로그아웃 | `POST /users/auth/logout` | Bearer JWT, 본문 없음 | 200, 본문 없음 |
-| 내 정보 | `GET /users/me` | Bearer JWT | 200, 사용자 |
+| 회원가입 | `POST /users/auth/signup` | `SignupRequest` | 201, `UserResponse` |
+| 로그인 | `POST /users/auth/login` | `LoginRequest` | 200, `LoginResponse` |
+| 로그아웃 | `POST /users/auth/logout` | 없음 | 200, 데이터 없음 |
+| 내 정보 | `GET /users/me` | 없음 | 200, `UserResponse` |
 
-사용자 형식:
+`SignupRequest`:
 
 ```json
-{"userId":1,"email":"alice@example.com","name":"alice","role":"USER","createdAt":"2026-09-30T10:00:00"}
+{
+  "email": "alice@example.com",
+  "password": "password123",
+  "name": "앨리스"
+}
 ```
 
-로그인 `data` 형식:
+`email`은 필수·이메일 형식·최대 100자, `password`는 필수·8~64자, `name`은 필수·최대 30자입니다. 이메일은 앞뒤 공백을 제거하고 소문자로 저장합니다. 비밀번호는 응답에 포함하지 않습니다. 중복 이메일은 `409 DUPLICATE_EMAIL`입니다.
+
+`LoginRequest`: `{"email":"alice@example.com","password":"password123"}`. 잘못된 이메일 또는 비밀번호는 `401 LOGIN_FAILED`입니다.
+
+`UserResponse`(`data`):
+
+```json
+{
+  "userId": 1,
+  "email": "alice@example.com",
+  "name": "앨리스",
+  "role": "USER",
+  "createdAt": "2026-10-01T10:30:00"
+}
+```
+
+`LoginResponse`(`data`):
 
 ```json
 {
   "accessToken": "<JWT>",
   "tokenType": "Bearer",
   "expiresIn": 3600,
-  "user": {"userId":1,"email":"alice@example.com","name":"alice","role":"USER","createdAt":"2026-09-30T10:00:00"}
+  "user": {
+    "userId": 1,
+    "email": "alice@example.com",
+    "name": "앨리스",
+    "role": "USER",
+    "createdAt": "2026-10-01T10:30:00"
+  }
 }
 ```
 
-## 세션
+`expiresIn`의 단위는 초입니다. 로그아웃한 토큰은 만료될 때까지 서버 메모리에서 차단합니다. 서버가 재시작되면 이 차단 목록은 초기화됩니다.
 
-새 세션의 상태는 `READY → ONGOING → ENDED`입니다. 기존 DB에 저장된 `ACTIVE`도 진행 중 상태로 읽을 수 있습니다.
+## 3. 세션
 
-| 기능 | 메서드·경로 | 요청 | 성공 상태·`data` |
+| 기능 | 메서드·경로 | 요청 | 성공 |
 |---|---|---|---|
-| 생성 | `POST /sessions` | JSON: `title`(필수, 최대 100자), `description`(선택) | 201, 세션 |
-| 목록 | `GET /sessions` | 선택 쿼리 `status=READY\|ONGOING\|ENDED` | 200, 세션 배열 |
-| 상세 | `GET /sessions/{sessionId}` | 본문 없음 | 200, 세션 |
-| 수정 | `PATCH /sessions/{sessionId}` | JSON: `title`, `description` 중 변경할 필드 | 200, 세션 |
-| 삭제 | `DELETE /sessions/{sessionId}` | 본문 없음 | 200, 본문 없음 |
-| 시작 | `POST /sessions/{sessionId}/start` | 본문 없음 | 200, 세션 |
-| 종료 | `POST /sessions/{sessionId}/end` | 본문 없음 | 200, 세션 |
-| 참여 | `POST /sessions/{sessionId}/participants` | 본문 없음 | 201, 참여 정보 |
+| 생성 | `POST /sessions` | JSON: `title`(필수), `description`(선택) | 201, `SessionResponse` |
+| 목록 | `GET /sessions` | 선택 쿼리 `status` | 200, `SessionResponse[]` |
+| 상세 | `GET /sessions/{sessionId}` | 없음 | 200, `SessionResponse` |
+| 수정 | `PATCH /sessions/{sessionId}` | JSON: `title`, `description` 중 변경할 필드 | 200, `SessionResponse` |
+| 삭제 | `DELETE /sessions/{sessionId}` | 없음 | 200, 데이터 없음 |
+| 시작 | `POST /sessions/{sessionId}/start` | 없음 | 200, `SessionResponse` |
+| 종료 | `POST /sessions/{sessionId}/end` | 없음 | 200, `SessionResponse` |
+| 참여 | `POST /sessions/{sessionId}/participants` | 없음 | 201, `ParticipantResponse` |
 
-세션 `data` 형식:
+생성 요청 예시:
+
+```json
+{"title":"1주차 발표","description":"질문을 받는 세션"}
+```
+
+`title`은 공백만으로 구성할 수 없고 최대 100자입니다. 수정 요청은 보낸 필드만 변경합니다. `description:null`은 변경 없음으로 처리됩니다.
+
+`SessionResponse`(`data`):
 
 ```json
 {
   "sessionId": 1,
-  "title": "발표 세션",
-  "description": "세션 설명",
+  "title": "1주차 발표",
+  "description": "질문을 받는 세션",
   "presenterId": 1,
-  "presenterName": "alice",
+  "presenterName": "앨리스",
   "entryCode": "ABC234",
   "status": "READY",
   "startedAt": null,
   "endedAt": null,
-  "createdAt": "2026-09-30T10:00:00"
+  "createdAt": "2026-10-01T10:30:00"
 }
 ```
 
-참여 `data`: `{"sessionId":1,"userId":2,"role":"AUDIENCE"}`. 세션 수정·삭제·시작·종료는 발표자만 할 수 있습니다.
+- 새 세션 상태는 `READY → ONGOING → ENDED`입니다. 기존 DB의 `ACTIVE`도 진행 중 상태로 읽고 종료할 수 있습니다.
+- 목록은 생성일 내림차순의 전체 세션 배열입니다. `?status=READY`, `?status=ONGOING`, `?status=ACTIVE`, `?status=ENDED`로 필터링할 수 있습니다. 로그인 사용자별 필터와 페이지 처리는 없습니다.
+- 조회·목록은 로그인 사용자에게 열려 있습니다. 수정·삭제·시작·종료는 발표자만 할 수 있습니다. 종료된 세션은 수정할 수 없습니다. 처리 중인 자료가 있는 세션은 삭제할 수 없습니다.
+- `entryCode`는 새 세션에 발급되는 6자리 코드입니다. 현재 참여 API는 이 코드를 요청하거나 검증하지 않습니다. 이전 DB에서 생성된 세션은 `entryCode:null`일 수 있습니다.
+- 발표자는 참여자로 등록할 수 없고, 종료된 세션에도 참여할 수 없습니다. 이미 등록된 참여자가 다시 요청하면 기존 참여 정보를 반환합니다.
 
-## 자료
+`ParticipantResponse`(`data`): `{"sessionId":1,"userId":2,"role":"AUDIENCE"}`.
 
-자료 `data`: `{"id":1,"sessionId":1,"fileName":"file.pdf","contentType":"application/pdf","fileSize":1234,"status":"PENDING","createdAt":"...","updatedAt":"..."}`
+## 4. 자료
 
-| 기능 | 메서드·경로 | 요청 | 성공 상태·`data` |
+| 기능 | 메서드·경로 | 요청 | 성공 |
 |---|---|---|---|
-| 업로드 | `POST /sessions/{sessionId}/materials` | `multipart/form-data`: `file`(PDF, 최대 50 MB) | 202, 자료 |
-| 목록 | `GET /sessions/{sessionId}/materials` | 선택 쿼리 `page`, `size` | 200, 페이지 |
-| 상세 | `GET /materials/{materialId}` | 본문 없음 | 200, 자료 |
-| 삭제 | `DELETE /materials/{materialId}` | 본문 없음 | 200, 본문 없음 |
-| AI 재시도 | `POST /materials/{materialId}/retry` | 본문 없음 | 202, 자료 |
+| 업로드 | `POST /sessions/{sessionId}/materials` | `multipart/form-data`: `file` | 202, `MaterialResponse` |
+| 목록 | `GET /sessions/{sessionId}/materials` | 선택 쿼리 `page`, `size` | 200, 페이지<`MaterialResponse`> |
+| 상세 | `GET /materials/{materialId}` | 없음 | 200, `MaterialResponse` |
+| 삭제 | `DELETE /materials/{materialId}` | 없음 | 200, 데이터 없음 |
+| AI 처리 재시도 | `POST /materials/{materialId}/retry` | 없음 | 202, `MaterialResponse` |
 
-자료 상태: `PENDING`, `PROCESSING`, `COMPLETED`, `FAILED`. 업로드와 재시도는 비동기 AI 작업을 시작합니다.
+업로드 파일은 최대 50 MiB의 PDF여야 하며, 파일 이름 확장자 `.pdf`와 파일 시작 부분의 `%PDF-`를 확인합니다. 업로드·삭제·재시도는 발표자만, 목록·상세 조회는 발표자와 참여자가 사용할 수 있습니다. 처리 중인 자료는 삭제할 수 없고, AI 처리 재시도는 `FAILED` 상태에서만 가능합니다.
 
-## 질문
+`MaterialResponse`(`data`):
 
-질문 `data`: `{"id":1,"sessionId":1,"content":"질문","anonymous":false,"author":{"id":2,"username":"bob"},"aiStatus":"PENDING","answers":[],"createdAt":"...","updatedAt":"..."}`. 익명 질문은 `author:null`입니다.
+```json
+{
+  "id": 1,
+  "sessionId": 1,
+  "fileName": "lecture.pdf",
+  "contentType": "application/pdf",
+  "fileSize": 12345,
+  "status": "PENDING",
+  "createdAt": "2026-10-01T10:30:00",
+  "updatedAt": "2026-10-01T10:30:00"
+}
+```
 
-| 기능 | 메서드·경로 | 요청 | 성공 상태·`data` |
+`fileSize` 단위는 바이트입니다. `status` 값은 `PENDING`, `PROCESSING`, `COMPLETED`, `FAILED`입니다. 목록은 ID 내림차순입니다. 파일 다운로드 API는 구현되어 있지 않습니다.
+
+## 5. 질문
+
+| 기능 | 메서드·경로 | 요청 | 성공 |
 |---|---|---|---|
-| 등록 | `POST /sessions/{sessionId}/questions` | JSON: `content`(필수), `anonymous`(기본 `false`) | 202, 질문 |
-| 목록 | `GET /sessions/{sessionId}/questions` | 선택 쿼리 `page`, `size` | 200, 페이지 |
-| 새 질문 조회 | `GET /sessions/{sessionId}/questions?afterId={id}` | `afterId` | 200, `{"items":[],"nextAfterId":0}` |
-| 상세 | `GET /questions/{questionId}` | 본문 없음 | 200, 질문 |
-| 수정 | `PATCH /questions/{questionId}` | JSON: `content`, `anonymous` 중 변경할 필드 | 200, 질문 |
-| 삭제 | `DELETE /questions/{questionId}` | 본문 없음 | 200, 본문 없음 |
-| AI 답변 재시도 | `POST /questions/{questionId}/ai-answer/retry` | 본문 없음 | 202, 질문 |
+| 등록 | `POST /sessions/{sessionId}/questions` | JSON: `content`(필수), `anonymous`(선택) | 202, `QuestionResponse` |
+| 목록 | `GET /sessions/{sessionId}/questions` | 선택 쿼리 `page`, `size` | 200, 페이지<`QuestionResponse`> |
+| 신규 질문 조회 | `GET /sessions/{sessionId}/questions?afterId={id}` | `afterId`(0 이상) | 200, Polling 응답 |
+| 상세 | `GET /questions/{questionId}` | 없음 | 200, `QuestionResponse` |
+| 수정 | `PATCH /questions/{questionId}` | JSON: `content`, `anonymous` 중 변경할 필드 | 200, `QuestionResponse` |
+| 삭제 | `DELETE /questions/{questionId}` | 없음 | 200, 데이터 없음 |
+| AI 답변 재시도 | `POST /questions/{questionId}/ai-answer/retry` | 없음 | 202, `QuestionResponse` |
 
-`aiStatus`: `PENDING`, `PROCESSING`, `COMPLETED`, `FAILED`. 새 질문 조회는 최대 100개를 반환합니다.
+등록 요청 예시: `{"content":"이 부분을 설명해 주세요","anonymous":false}`. `content`는 공백만으로 구성할 수 없습니다. `anonymous` 생략 시 `false`입니다.
 
-## 답변
+`QuestionResponse`(`data`):
 
-답변 `data`: `{"id":1,"questionId":1,"content":"답변","type":"PRESENTER","author":{"id":1,"username":"alice"},"createdAt":"..."}`. AI 답변은 `type:"AI"`, `author:null`입니다.
+```json
+{
+  "id": 1,
+  "sessionId": 1,
+  "content": "이 부분을 설명해 주세요",
+  "anonymous": false,
+  "author": {"id": 2, "username": "밥"},
+  "aiStatus": "PENDING",
+  "answers": [],
+  "createdAt": "2026-10-01T10:30:00",
+  "updatedAt": "2026-10-01T10:30:00"
+}
+```
 
-| 기능 | 메서드·경로 | 요청 | 성공 상태·`data` |
+`author.username`에는 사용자의 `name` 값이 들어갑니다. 익명 질문은 `author:null`입니다. `aiStatus` 값은 `PENDING`, `PROCESSING`, `COMPLETED`, `FAILED`입니다.
+
+- 등록·조회는 세션 발표자 또는 참여자만 가능합니다. 질문 수정은 작성자만, AI 처리가 시작되기 전(`PENDING`)에만 가능합니다.
+- 삭제는 작성자 또는 발표자가 할 수 있습니다. AI 답변 재시도는 발표자만, `FAILED` 상태에서만 가능합니다.
+- 일반 목록은 ID 내림차순입니다. Polling은 `afterId`보다 큰 ID를 오름차순으로 최대 100개 반환합니다.
+
+Polling 응답 예시:
+
+```json
+{
+  "success": true,
+  "data": {
+    "items": [],
+    "nextAfterId": 12
+  }
+}
+```
+
+새 항목이 없으면 `nextAfterId`는 요청한 `afterId`와 같습니다.
+
+## 6. 답변
+
+| 기능 | 메서드·경로 | 요청 | 성공 |
 |---|---|---|---|
-| 목록 | `GET /questions/{questionId}/answers` | 본문 없음 | 200, 답변 배열 |
-| 등록 | `POST /questions/{questionId}/answers` | JSON: `content`(필수) | 201, 답변 |
-| 수정 | `PATCH /answers/{answerId}` | JSON: `content`(필수) | 200, 답변 |
-| 삭제 | `DELETE /answer/{answerId}` | 본문 없음 | 200, 본문 없음 |
+| 목록 | `GET /questions/{questionId}/answers` | 없음 | 200, `AnswerResponse[]` |
+| 등록 | `POST /questions/{questionId}/answers` | JSON: `content`(필수) | 201, `AnswerResponse` |
+| 수정 | `PATCH /answers/{answerId}` | JSON: `content`(필수) | 200, `AnswerResponse` |
+| 삭제 | `DELETE /answer/{answerId}` | 없음 | 200, 데이터 없음 |
 
-답변 삭제 경로는 현재 구현대로 `/answer/{answerId}` 단수형입니다.
+등록·수정 요청 예시: `{"content":"발표자의 답변입니다"}`. `content`는 공백만으로 구성할 수 없습니다.
+
+`AnswerResponse`(`data`):
+
+```json
+{
+  "id": 1,
+  "questionId": 1,
+  "content": "발표자의 답변입니다",
+  "type": "PRESENTER",
+  "author": {"id": 1, "username": "앨리스"},
+  "createdAt": "2026-10-01T10:35:00"
+}
+```
+
+`type`은 `PRESENTER` 또는 `AI`입니다. AI 답변은 `author:null`입니다. 목록은 ID 오름차순이며, 세션 발표자·참여자가 조회할 수 있습니다. 발표자만 답변을 등록할 수 있고, 작성한 발표자 답변만 수정할 수 있습니다. 삭제는 작성자 또는 발표자가 할 수 있으며, AI 답변은 발표자만 삭제할 수 있습니다.
+
+현재 삭제 경로는 `/answers/{answerId}`가 아닌 **`/answer/{answerId}`**입니다.
