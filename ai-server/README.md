@@ -278,7 +278,7 @@ DB_PASSWORD=password
 .venv/
 __pycache__/
 *.pyc
-.idea/
+../.idea/
 .DS_Store
 ```
 
