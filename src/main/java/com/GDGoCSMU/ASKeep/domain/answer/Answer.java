@@ -2,7 +2,7 @@ package com.GDGoCSMU.ASKeep.domain.answer;
 
 import com.GDGoCSMU.ASKeep.domain.common.BaseEntity;
 import com.GDGoCSMU.ASKeep.domain.question.Question;
-import com.GDGoCSMU.ASKeep.domain.user.domain.User;
+import com.GDGoCSMU.ASKeep.domain.user.entity.User;
 import jakarta.persistence.*;
 import lombok.*;
 

@@ -1,10 +1,12 @@
 package com.GDGoCSMU.ASKeep.domain.question;
 
 import com.GDGoCSMU.ASKeep.domain.common.BaseEntity;
-import com.GDGoCSMU.ASKeep.domain.session.StudySession;
-import com.GDGoCSMU.ASKeep.domain.user.domain.User;
+import com.GDGoCSMU.ASKeep.domain.session.entity.Session;
+import com.GDGoCSMU.ASKeep.domain.user.entity.User;
 import jakarta.persistence.*;
 import lombok.*;
+import java.util.ArrayList;
+import java.util.List;
 
 @Entity
 @Getter
@@ -25,7 +27,7 @@ public class Question extends BaseEntity {
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "session_id", nullable = false)
-    private StudySession session;
+    private Session session;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "user_id", nullable = false)
@@ -34,8 +36,11 @@ public class Question extends BaseEntity {
     @Column(name = "is_anonymous", nullable = false)
     private boolean anonymous;
 
+    @OneToMany(mappedBy = "question", cascade = CascadeType.ALL, orphanRemoval = true)
+    private List<com.GDGoCSMU.ASKeep.domain.answer.Answer> answers = new ArrayList<>();
+
     @Builder
-    public Question(String content, StudySession session, User user, boolean anonymous) {
+    public Question(String content, Session session, User user, boolean anonymous) {
         this.content = content;
         this.session = session;
         this.user = user;

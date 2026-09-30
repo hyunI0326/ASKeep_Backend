@@ -1,12 +1,13 @@
 package com.GDGoCSMU.ASKeep.domain.material;
 
 import com.GDGoCSMU.ASKeep.domain.common.BaseEntity;
-import com.GDGoCSMU.ASKeep.domain.session.StudySession;
+import com.GDGoCSMU.ASKeep.domain.session.entity.Session;
 import jakarta.persistence.*;
 import lombok.*;
 
 
 @Getter
+@Entity
 @Setter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 @Table(name = "materials")
@@ -31,10 +32,10 @@ public class Material extends BaseEntity {
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "session_id", nullable = false)
-    private StudySession session;
+    private Session session;
 
     @Builder
-    public Material(String fileName, String filePath, String contentType, Long fileSize, StudySession session) {
+    public Material(String fileName, String filePath, String contentType, Long fileSize, Session session) {
         this.fileName = fileName;
         this.filePath = filePath;
         this.contentType = contentType;
