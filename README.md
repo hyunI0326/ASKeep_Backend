@@ -57,3 +57,73 @@
   });
   client.activate();
   ```
+
+
+==============================
+
+## feature/question-realtime — 질문 실시간 알림
+
+정헌님 웹소켓(`SessionTopicEvent`) 위에 질문 알림을 연결한 브랜치입니다.
+
+### 완료
+
+| 상황 | 알림 | `data` |
+|---|---|---|
+| 질문 등록 | `QUESTION_CREATED` | 질문 객체 (`aiStatus: PENDING`) |
+| AI 답변 생성 시작 | `QUESTION_UPDATED` | 질문 객체 (`aiStatus: PROCESSING`) |
+| AI 답변 완료 | `QUESTION_UPDATED` | 질문 객체 (`aiStatus: COMPLETED`, `answers`에 AI 답변 포함) |
+| AI 답변 실패 | `QUESTION_UPDATED` | 질문 객체 (`aiStatus: FAILED`) |
+
+### 예정
+
+- 질문 수정, AI 재시도 → `QUESTION_UPDATED`
+- 질문 삭제 → `QUESTION_DELETED` (`data: { "questionId": 1 }`)
+- 발표자 답변 등록·수정·삭제 → `QUESTION_UPDATED`
+
+### 질문 객체 (`data`)
+
+REST 질문 조회 응답(`QuestionResponse`)과 같은 형식입니다.
+
+```json
+{
+  "id": 1,
+  "sessionId": 3,
+  "content": "어텐션은 왜 필요한가요?",
+  "anonymous": false,
+  "author": { "id": 7, "username": "민식" },
+  "aiStatus": "COMPLETED",
+  "answers": [
+    { "id": 5, "questionId": 1, "content": "AI 답변 내용", "type": "AI", "author": null, "createdAt": "2026-10-01T22:30:05" }
+  ],
+  "createdAt": "2026-10-01T22:30:00",
+  "updatedAt": "2026-10-01T22:30:05"
+}
+```
+
+- 익명 질문은 알림에서 `author`가 항상 `null`입니다 (모든 구독자에게 같은 메시지가 가기 때문)
+- AI 답변의 `author`는 항상 `null`입니다
+
+### 프론트 참고
+
+- 질문 하나에 알림이 여러 번 옵니다: `CREATED` → `UPDATED(PROCESSING)` → `UPDATED(COMPLETED 또는 FAILED)`
+- 같은 `id`의 질문이 오면 **`updatedAt`이 더 최신일 때만 통째로 교체**하면 됩니다. 순서가 뒤바뀌어 와도 오래된 내용이 덮어쓰지 않습니다
+- 로컬에서 AI 서버를 안 켜면 AI 단계는 항상 `FAILED`로 끝납니다 (정상)
+
+### 백엔드 변경
+
+- `QuestionService`
+  - `create()`: 질문 저장 직후 `QUESTION_CREATED` 발행 (AI 처리 시작보다 먼저 보내서 순서 보장)
+  - `processAsync()`: AI 상태가 바뀔 때마다 `QUESTION_UPDATED` 발행, 실패 시 `log.warn` 추가 (기존엔 실패해도 로그가 없었음)
+  - `publishUpdated()` 추가: 비동기 스레드에서는 DB 연결이 닫혀 있어 작성자 정보를 못 읽는 문제가 있어, `TransactionTemplate`으로 조회 후 발행
+- 로직(AI 호출, 상태 변경)은 기존 그대로입니다
+
+### 테스트
+
+`src/test/.../domain/QuestionRealtimeTest.java` (H2 사용, DB 설치 불필요)
+
+- 질문 등록 시 `QUESTION_CREATED` 수신, 익명이면 `author` 가려짐
+- AI 처리 시 `PROCESSING` → `FAILED` 순서로 `QUESTION_UPDATED` 수신 (익명 아닌 질문으로 작성자 정보 확인)
+
+```
+.\gradlew.bat test --tests "com.GDGoCSMU.ASKeep.domain.QuestionRealtimeTest"
+```
