@@ -136,6 +136,9 @@
 | 시작 | `POST /sessions/{sessionId}/start` | 없음 | 200, `SessionResponse` |
 | 종료 | `POST /sessions/{sessionId}/end` | 없음 | 200, `SessionResponse` |
 | 참여 | `POST /sessions/participants` | JSON: `entryCode`(필수) | 201, `ParticipantResponse` |
+| 요약 조회 | `GET /sessions/{sessionId}/summary` | 없음 | 200, `SummaryResponse` |
+| 요약 재시도 | `POST /sessions/{sessionId}/summary/retry` | 없음 | 202, `SummaryResponse` |
+| 내 세션 기록 | `GET /users/me/sessions` | 선택 쿼리 `role`(`PRESENTER`/`AUDIENCE`) | 200, `MySessionResponse[]` |
 
 생성 요청 예시:
 
@@ -179,6 +182,42 @@
 | 이미 참여한 사용자가 다시 요청 | 201, 기존 참여 정보 반환 |
 
 `ParticipantResponse`(`data`): `{"sessionId":1,"userId":2,"role":"AUDIENCE"}`.
+
+### 세션 요약
+
+세션을 종료하면 서버가 AI 서버(`POST /sessions/summary`)에 요약을 요청합니다. 종료 직후 상태는 `PENDING`이고 `PROCESSING`을 거쳐 `COMPLETED` 또는 `FAILED`가 되므로 요약 조회 API로 다시 확인하세요.
+
+`SummaryResponse`(`data`):
+
+```json
+{
+  "sessionId": 1,
+  "status": "COMPLETED",
+  "summary": "JPA N+1 문제와 해결 방법을 다뤘습니다.",
+  "tags": ["JPA", "N+1"],
+  "createdAt": "2026-10-01T10:30:00",
+  "updatedAt": "2026-10-01T10:30:05"
+}
+```
+
+- 조회는 발표자·참여자만 가능합니다(아니면 403 `NOT_SESSION_PARTICIPANT`). 종료 전이라 요약이 없으면 404 `SUMMARY_NOT_FOUND`입니다.
+- 재시도는 발표자만(403 `NOT_SESSION_PRESENTER`), `FAILED` 상태에서만(409 `SUMMARY_RETRY_NOT_ALLOWED`) 가능합니다.
+- `tags`는 최대 10개, 각 30자 이내이며 `#`은 붙지 않습니다. 지식베이스 검색용 임베딩은 아직 없습니다(P2).
+
+### 내 세션 기록
+
+`MySessionResponse`(`data` 배열의 항목):
+
+```json
+{
+  "myRole": "PRESENTER",
+  "session": { "sessionId": 1, "title": "1주차 발표", "status": "ENDED", "...": "SessionResponse와 같음" },
+  "summaryStatus": "COMPLETED"
+}
+```
+
+- 내가 만든 세션(`PRESENTER`)과 입장 코드로 참여한 세션(`AUDIENCE`)을 생성일 내림차순으로 반환합니다. `?role=`로 한쪽만 볼 수 있습니다.
+- `summaryStatus`는 요약 상태이며, 종료 전 세션은 `null`입니다.
 
 ## 4. 자료
 

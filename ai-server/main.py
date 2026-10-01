@@ -11,6 +11,8 @@ from dotenv import load_dotenv
 from google import genai
 from google.genai.errors import ServerError
 import time
+import json
+from typing import List, Optional
 
 
 class DocumentRequest(BaseModel) :
@@ -25,6 +27,17 @@ class SearchRequest(BaseModel):
     sessionId: int
     query: str
     limit: int = 5
+
+#세션 요약 요청 (Spring이 세션 종료 시 호출)
+class SummaryQuestion(BaseModel):
+    question: str
+    answers: List[str] = []
+
+class SummaryRequest(BaseModel):
+    sessionId: int
+    title: str
+    description: Optional[str] = None
+    questions: List[SummaryQuestion] = []
 
 #업로드 폴더 밖의 경로 접근 차단
 def resolve_upload_path(file_path: str) -> Path:
@@ -340,3 +353,67 @@ def ai_answer(request:QuestionRequest):
         "answer" : result["answer"],
         "sources" : result["sources"]
     }
+
+
+#세션 요약 + 태그 생성 (Gemini, JSON 응답)
+def generate_summary(request: SummaryRequest):
+    qa_lines = []
+    for i, item in enumerate(request.questions, start=1):
+        qa_lines.append(f"Q{i}. {item.question}")
+        for answer in item.answers:
+            qa_lines.append(f"  - {answer}")
+    qa_text = "\n".join(qa_lines) if qa_lines else "(질문 없음)"
+
+    prompt = f"""
+너는 발표/스터디 세션이 끝난 뒤 내용을 정리하는 AI야.
+
+아래 [세션 정보]와 [질문과 답변]만을 근거로 세션을 요약하고 태그를 만들어.
+
+규칙:
+1. summary: 세션에서 다룬 핵심 내용과 주요 질문을 한국어 3~6문장으로 요약한다.
+2. 질문이 없으면 세션 제목과 설명만으로 1~2문장으로 짧게 요약한다.
+3. tags: 세션 주제를 나타내는 키워드 3~7개 (각 20자 이내, '#' 없이).
+4. 주어진 내용에 없는 사실을 지어내지 않는다.
+5. 반드시 {{"summary": "...", "tags": ["...", "..."]}} 형식의 JSON만 출력한다.
+
+[세션 정보]
+제목: {request.title}
+설명: {request.description or "(없음)"}
+
+[질문과 답변]
+{qa_text}
+"""
+    for attempt in range(4):
+        try:
+            response = gemini_client.models.generate_content(
+                model="gemini-3.8-flash",
+                contents=prompt,
+                config={"response_mime_type": "application/json"}
+            )
+            data = json.loads(response.text)
+            summary = str(data.get("summary", "")).strip()
+            tags = [str(tag).strip() for tag in data.get("tags", []) if str(tag).strip()]
+            if not summary:
+                raise ValueError("요약이 비어 있습니다.")
+            return {"summary": summary, "tags": tags}
+        except ServerError as e:
+            if e.code == 503 and attempt < 3:
+                delay = 2**attempt
+                print(f"Gemini 서버 혼잡, {delay}초 후 재시도...")
+                time.sleep(delay)
+            else:
+                raise
+
+
+@app.post("/sessions/summary")
+def session_summary(request: SummaryRequest):
+    try:
+        result = generate_summary(request)
+        return {
+            "sessionId": request.sessionId,
+            "summary": result["summary"],
+            "tags": result["tags"]
+        }
+    except Exception as e:
+        print("ERROR:", type(e).__name__, str(e))
+        raise HTTPException(status_code=500, detail=str(e))

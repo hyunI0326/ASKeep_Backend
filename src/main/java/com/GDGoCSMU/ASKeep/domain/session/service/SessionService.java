@@ -1,7 +1,11 @@
 package com.GDGoCSMU.ASKeep.domain.session.service;
 
+import com.GDGoCSMU.ASKeep.domain.session.dto.MySessionResponse;
 import com.GDGoCSMU.ASKeep.domain.session.dto.SessionCreateRequest;
 import com.GDGoCSMU.ASKeep.domain.session.dto.SessionResponse;
+import com.GDGoCSMU.ASKeep.domain.session.summary.SessionSummaryRepository;
+import com.GDGoCSMU.ASKeep.domain.session.summary.SessionSummaryService;
+import com.GDGoCSMU.ASKeep.domain.user.domain.UserRole;
 import com.GDGoCSMU.ASKeep.domain.session.dto.SessionUpdateRequest;
 import com.GDGoCSMU.ASKeep.domain.session.SessionParticipant;
 import com.GDGoCSMU.ASKeep.domain.session.SessionParticipantRepository;
@@ -19,6 +23,9 @@ import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -35,17 +42,22 @@ public class SessionService {
     private final SessionParticipantRepository participantRepository;
     private final MaterialService materialService;
     private final ApplicationEventPublisher eventPublisher;
+    private final SessionSummaryService summaryService;
+    private final SessionSummaryRepository summaryRepository;
 
     public SessionService(SessionRepository sessionRepository, UserService userService,
                           EntryCodeGenerator entryCodeGenerator,
                           SessionParticipantRepository participantRepository, MaterialService materialService,
-                          ApplicationEventPublisher eventPublisher) {
+                          ApplicationEventPublisher eventPublisher,
+                          SessionSummaryService summaryService, SessionSummaryRepository summaryRepository) {
         this.sessionRepository = sessionRepository;
         this.userService = userService;
         this.entryCodeGenerator = entryCodeGenerator;
         this.participantRepository = participantRepository;
         this.materialService = materialService;
         this.eventPublisher = eventPublisher;
+        this.summaryService = summaryService;
+        this.summaryRepository = summaryRepository;
     }
 
     @Transactional
@@ -80,7 +92,34 @@ public class SessionService {
     public void delete(Long userId, Long sessionId) {
         Session session = findOwnedSession(userId, sessionId);
         materialService.deleteSessionFiles(sessionId);
+        summaryRepository.deleteBySession_Id(sessionId);  // 요약이 세션을 참조하므로 먼저 삭제
         sessionRepository.delete(session);
+    }
+
+    /**
+     * 내 세션 기록: 내가 만든 세션(PRESENTER) + 참여한 세션(AUDIENCE), 최신순.
+     * role을 주면 그 역할만. 각 세션의 요약 상태(summaryStatus, 없으면 null)를 함께 준다.
+     */
+    public List<MySessionResponse> getMySessions(Long userId, UserRole role) {
+        List<MySessionResponse> result = new ArrayList<>();
+        if (role == null || role == UserRole.PRESENTER) {
+            sessionRepository.findAllByPresenter_IdOrderByCreatedAtDesc(userId)
+                    .forEach(s -> result.add(new MySessionResponse(UserRole.PRESENTER.name(), SessionResponse.from(s), null)));
+        }
+        if (role == null || role == UserRole.AUDIENCE) {
+            sessionRepository.findJoinedByUserId(userId)
+                    .forEach(s -> result.add(new MySessionResponse(UserRole.AUDIENCE.name(), SessionResponse.from(s), null)));
+        }
+        if (result.isEmpty()) return result;
+
+        Map<Long, String> summaryStatus = new HashMap<>();
+        summaryRepository.findBySession_IdIn(result.stream().map(r -> r.session().sessionId()).toList())
+                .forEach(s -> summaryStatus.put(s.getSession().getId(), s.getStatus().name()));
+        return result.stream()
+                .map(r -> new MySessionResponse(r.myRole(), r.session(), summaryStatus.get(r.session().sessionId())))
+                .sorted(Comparator.comparing((MySessionResponse r) -> r.session().createdAt(),
+                        Comparator.nullsLast(Comparator.reverseOrder())))
+                .toList();
     }
 
     /** 청중이 발표자에게 받은 6자리 입장 코드로 참여한다. 이미 참여했으면 기존 참여 정보를 돌려준다. */
@@ -111,6 +150,7 @@ public class SessionService {
         Session session = findOwnedSession(userId, sessionId);
         session.end();
         publishStatusChanged(session);
+        summaryService.requestFor(session);  // P1: 커밋 후 AI 요약 시작 (결과는 GET /sessions/{id}/summary)
         return SessionResponse.from(session);
     }
 

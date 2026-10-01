@@ -5,6 +5,8 @@ import com.GDGoCSMU.ASKeep.domain.material.dto.AiDocumentRequest;
 import com.GDGoCSMU.ASKeep.domain.material.dto.AiDocumentResponse;
 import com.GDGoCSMU.ASKeep.domain.question.dto.AiAnswerRequest;
 import com.GDGoCSMU.ASKeep.domain.question.dto.AiAnswerResponse;
+import com.GDGoCSMU.ASKeep.domain.session.summary.dto.AiSummaryRequest;
+import com.GDGoCSMU.ASKeep.domain.session.summary.dto.AiSummaryResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
@@ -23,5 +25,10 @@ public class AiClientServer {
     public AiAnswerResponse answer(AiAnswerRequest request) {
         return aiRestClient.post().uri("/ai/answer").body(request)
                 .retrieve().body(AiAnswerResponse.class);
+    }
+
+    public AiSummaryResponse summarize(AiSummaryRequest request) {
+        return aiRestClient.post().uri("/sessions/summary").body(request)
+                .retrieve().body(AiSummaryResponse.class);
     }
 }

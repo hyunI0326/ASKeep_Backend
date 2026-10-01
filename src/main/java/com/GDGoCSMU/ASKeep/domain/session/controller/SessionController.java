@@ -7,6 +7,8 @@ import com.GDGoCSMU.ASKeep.domain.session.dto.SessionResponse;
 import com.GDGoCSMU.ASKeep.domain.session.dto.SessionUpdateRequest;
 import com.GDGoCSMU.ASKeep.domain.session.entity.SessionStatus;
 import com.GDGoCSMU.ASKeep.domain.session.service.SessionService;
+import com.GDGoCSMU.ASKeep.domain.session.summary.SessionSummaryService;
+import com.GDGoCSMU.ASKeep.domain.session.summary.dto.SummaryResponse;
 import com.GDGoCSMU.ASKeep.global.common.ApiResponse;
 import com.GDGoCSMU.ASKeep.global.security.LoginUser;
 import jakarta.validation.Valid;
@@ -21,9 +23,11 @@ import java.util.List;
 public class SessionController {
 
     private final SessionService sessionService;
+    private final SessionSummaryService summaryService;
 
-    public SessionController(SessionService sessionService) {
+    public SessionController(SessionService sessionService, SessionSummaryService summaryService) {
         this.sessionService = sessionService;
+        this.summaryService = summaryService;
     }
 
     @PostMapping
@@ -76,6 +80,21 @@ public class SessionController {
     public ApiResponse<ParticipantResponse> joinByEntryCode(@AuthenticationPrincipal LoginUser loginUser,
                                                             @Valid @RequestBody SessionJoinRequest request) {
         return ApiResponse.ok(ParticipantResponse.from(sessionService.joinByEntryCode(loginUser.userId(), request.entryCode())));
+    }
+
+    /** 세션 종료 후 AI 요약 (발표자·참여자). 종료 직후엔 PENDING → PROCESSING → COMPLETED/FAILED */
+    @GetMapping("/{sessionId}/summary")
+    public ApiResponse<SummaryResponse> summary(@AuthenticationPrincipal LoginUser loginUser,
+                                                @PathVariable("sessionId") Long sessionId) {
+        return ApiResponse.ok(summaryService.get(loginUser.userId(), sessionId));
+    }
+
+    /** 요약이 FAILED일 때 발표자가 다시 요청 */
+    @PostMapping("/{sessionId}/summary/retry")
+    @ResponseStatus(HttpStatus.ACCEPTED)
+    public ApiResponse<SummaryResponse> retrySummary(@AuthenticationPrincipal LoginUser loginUser,
+                                                     @PathVariable("sessionId") Long sessionId) {
+        return ApiResponse.ok(summaryService.retry(loginUser.userId(), sessionId));
     }
 
     public record ParticipantResponse(Long sessionId, Long userId, String role) {
