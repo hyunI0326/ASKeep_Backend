@@ -121,6 +121,16 @@ class AuthAndSessionApiTest {
         mvc.perform(get(base).header("Authorization", "Bearer " + other))
                 .andExpect(status().isOk());
 
+        // 입장 코드는 발표자에게만 보이고, 참여하지 않은 사람에게는 숨겨진다
+        mvc.perform(get("/api/v1/sessions").header("Authorization", "Bearer " + other))
+                .andExpect(jsonPath("$.data[?(@.sessionId == " + id + ")].entryCode").value(org.hamcrest.Matchers.contains((Object) null)));
+        mvc.perform(get(base).header("Authorization", "Bearer " + other))
+                .andExpect(jsonPath("$.data.entryCode").doesNotExist());
+        mvc.perform(get("/api/v1/sessions").header("Authorization", "Bearer " + presenter))
+                .andExpect(jsonPath("$.data[?(@.sessionId == " + id + ")].entryCode").value(org.hamcrest.Matchers.contains(org.hamcrest.Matchers.notNullValue())));
+        mvc.perform(get(base).header("Authorization", "Bearer " + presenter))
+                .andExpect(jsonPath("$.data.entryCode").isString());
+
         // 발표자가 아니면 수정/시작 불가
         mvc.perform(patch(base).header("Authorization", "Bearer " + other)
                         .contentType(MediaType.APPLICATION_JSON).content("{\"title\":\"x\"}"))
@@ -203,6 +213,12 @@ class AuthAndSessionApiTest {
                     .andExpect(jsonPath("$.data.sessionId").value(id))
                     .andExpect(jsonPath("$.data.role").value("AUDIENCE"));
         }
+
+        // 참여한 뒤에는 입장 코드가 보인다
+        mvc.perform(get(base).header("Authorization", "Bearer " + audience))
+                .andExpect(jsonPath("$.data.entryCode").value(entryCode));
+        mvc.perform(get("/api/v1/sessions").header("Authorization", "Bearer " + audience))
+                .andExpect(jsonPath("$.data[?(@.sessionId == " + id + ")].entryCode").value(org.hamcrest.Matchers.contains(entryCode)));
 
         // 시작 전(READY)에는 질문 불가
         mvc.perform(post(base + "/questions").header("Authorization", "Bearer " + audience)

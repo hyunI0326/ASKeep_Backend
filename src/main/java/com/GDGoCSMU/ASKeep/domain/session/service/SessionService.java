@@ -29,6 +29,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 @Service
 @Transactional(readOnly = true)
@@ -67,15 +68,21 @@ public class SessionService {
         return SessionResponse.from(sessionRepository.save(session));
     }
 
-    public List<SessionResponse> getList(SessionStatus status) {
+    /** 입장 코드는 내가 발표자이거나 참여한 세션에만 보인다 (나머지는 null) */
+    public List<SessionResponse> getList(Long userId, SessionStatus status) {
         List<Session> sessions = (status == null)
                 ? sessionRepository.findAllByOrderByCreatedAtDesc()
                 : sessionRepository.findAllByStatusOrderByCreatedAtDesc(status);
-        return sessions.stream().map(SessionResponse::from).toList();
+        Set<Long> joined = participantRepository.findSessionIdsByUserId(userId);
+        return sessions.stream()
+                .map(s -> SessionResponse.from(s, s.isPresenter(userId) || joined.contains(s.getId())))
+                .toList();
     }
 
-    public SessionResponse getDetail(Long sessionId) {
-        return SessionResponse.from(findSession(sessionId));
+    public SessionResponse getDetail(Long userId, Long sessionId) {
+        Session session = findSession(sessionId);
+        boolean member = session.isPresenter(userId) || participantRepository.existsBySession_IdAndUser_Id(sessionId, userId);
+        return SessionResponse.from(session, member);
     }
 
     @Transactional

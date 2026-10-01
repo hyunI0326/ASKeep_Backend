@@ -39,13 +39,15 @@ public class SessionController {
 
     /** GET /api/v1/sessions?status=ONGOING 처럼 상태로 거를 수 있다 (생략하면 전체) */
     @GetMapping
-    public ApiResponse<List<SessionResponse>> list(@RequestParam(name = "status", required = false) SessionStatus status) {
-        return ApiResponse.ok(sessionService.getList(status));
+    public ApiResponse<List<SessionResponse>> list(@AuthenticationPrincipal LoginUser loginUser,
+                                                   @RequestParam(name = "status", required = false) SessionStatus status) {
+        return ApiResponse.ok(sessionService.getList(loginUser.userId(), status));
     }
 
     @GetMapping("/{sessionId}")
-    public ApiResponse<SessionResponse> detail(@PathVariable("sessionId") Long sessionId) {
-        return ApiResponse.ok(sessionService.getDetail(sessionId));
+    public ApiResponse<SessionResponse> detail(@AuthenticationPrincipal LoginUser loginUser,
+                                               @PathVariable("sessionId") Long sessionId) {
+        return ApiResponse.ok(sessionService.getDetail(loginUser.userId(), sessionId));
     }
 
     @PatchMapping("/{sessionId}")
