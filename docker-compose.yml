@@ -12,7 +12,3 @@ services:
 
 volumes:
   postgres_data:
-
-ai:
-  server:
-    base-url: http://ai-server:8000
