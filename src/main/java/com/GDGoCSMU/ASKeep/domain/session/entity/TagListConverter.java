@@ -1,4 +1,4 @@
-package com.GDGoCSMU.ASKeep.domain.session.summary;
+package com.GDGoCSMU.ASKeep.domain.session.entity;
 
 import jakarta.persistence.AttributeConverter;
 import jakarta.persistence.Converter;

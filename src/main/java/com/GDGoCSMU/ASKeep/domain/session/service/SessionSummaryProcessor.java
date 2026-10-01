@@ -1,8 +1,8 @@
-package com.GDGoCSMU.ASKeep.domain.session.summary;
+package com.GDGoCSMU.ASKeep.domain.session.service;
 
 import com.GDGoCSMU.ASKeep.domain.material.client.AiClientServer;
-import com.GDGoCSMU.ASKeep.domain.session.summary.dto.AiSummaryRequest;
-import com.GDGoCSMU.ASKeep.domain.session.summary.dto.AiSummaryResponse;
+import com.GDGoCSMU.ASKeep.domain.session.dto.AiSummaryRequest;
+import com.GDGoCSMU.ASKeep.domain.session.dto.AiSummaryResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;

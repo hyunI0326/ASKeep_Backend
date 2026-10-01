@@ -1,4 +1,4 @@
-package com.GDGoCSMU.ASKeep.domain.session.summary;
+package com.GDGoCSMU.ASKeep.domain.session.service;
 
 import com.GDGoCSMU.ASKeep.domain.answer.Answer;
 import com.GDGoCSMU.ASKeep.domain.answer.AnswerType;
@@ -6,9 +6,11 @@ import com.GDGoCSMU.ASKeep.domain.question.Question;
 import com.GDGoCSMU.ASKeep.domain.question.QuestionRepository;
 import com.GDGoCSMU.ASKeep.domain.session.SessionParticipantRepository;
 import com.GDGoCSMU.ASKeep.domain.session.entity.Session;
+import com.GDGoCSMU.ASKeep.domain.session.entity.SessionSummary;
 import com.GDGoCSMU.ASKeep.domain.session.repository.SessionRepository;
-import com.GDGoCSMU.ASKeep.domain.session.summary.dto.AiSummaryRequest;
-import com.GDGoCSMU.ASKeep.domain.session.summary.dto.SummaryResponse;
+import com.GDGoCSMU.ASKeep.domain.session.repository.SessionSummaryRepository;
+import com.GDGoCSMU.ASKeep.domain.session.dto.AiSummaryRequest;
+import com.GDGoCSMU.ASKeep.domain.session.dto.SummaryResponse;
 import com.GDGoCSMU.ASKeep.global.exception.BusinessException;
 import com.GDGoCSMU.ASKeep.global.exception.ErrorCode;
 import org.springframework.context.ApplicationEventPublisher;

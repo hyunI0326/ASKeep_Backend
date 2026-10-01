@@ -1,6 +1,6 @@
-package com.GDGoCSMU.ASKeep.domain.session.summary.dto;
+package com.GDGoCSMU.ASKeep.domain.session.dto;
 
-import com.GDGoCSMU.ASKeep.domain.session.summary.SessionSummary;
+import com.GDGoCSMU.ASKeep.domain.session.entity.SessionSummary;
 
 import java.time.LocalDateTime;
 import java.util.List;

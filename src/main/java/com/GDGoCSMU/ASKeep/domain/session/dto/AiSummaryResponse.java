@@ -1,4 +1,4 @@
-package com.GDGoCSMU.ASKeep.domain.session.summary.dto;
+package com.GDGoCSMU.ASKeep.domain.session.dto;
 
 import java.util.List;
 

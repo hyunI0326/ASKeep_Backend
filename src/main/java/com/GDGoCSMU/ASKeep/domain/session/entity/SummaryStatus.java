@@ -1,4 +1,4 @@
-package com.GDGoCSMU.ASKeep.domain.session.summary;
+package com.GDGoCSMU.ASKeep.domain.session.entity;
 
 /** 세션 요약 AI 처리 상태 */
 public enum SummaryStatus {

@@ -1,7 +1,6 @@
-package com.GDGoCSMU.ASKeep.domain.session.summary;
+package com.GDGoCSMU.ASKeep.domain.session.entity;
 
 import com.GDGoCSMU.ASKeep.domain.common.BaseEntity;
-import com.GDGoCSMU.ASKeep.domain.session.entity.Session;
 import com.GDGoCSMU.ASKeep.global.exception.BusinessException;
 import com.GDGoCSMU.ASKeep.global.exception.ErrorCode;
 import jakarta.persistence.*;

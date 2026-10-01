@@ -1,5 +1,6 @@
-package com.GDGoCSMU.ASKeep.domain.session.summary;
+package com.GDGoCSMU.ASKeep.domain.session.repository;
 
+import com.GDGoCSMU.ASKeep.domain.session.entity.SessionSummary;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 import java.util.Collection;
