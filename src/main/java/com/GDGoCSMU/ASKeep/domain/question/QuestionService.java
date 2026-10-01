@@ -1,5 +1,8 @@
 package com.GDGoCSMU.ASKeep.domain.question;
 
+import com.GDGoCSMU.ASKeep.global.websocket.RealtimeEventType;
+import com.GDGoCSMU.ASKeep.global.websocket.SessionTopicEvent;
+import org.springframework.context.ApplicationEventPublisher;
 import com.GDGoCSMU.ASKeep.domain.answer.Answer;
 import com.GDGoCSMU.ASKeep.domain.answer.AnswerRepository;
 import com.GDGoCSMU.ASKeep.domain.answer.AnswerType;
@@ -26,11 +29,14 @@ public class QuestionService {
     private final SessionAccessService sessionAccess;
     private final UserService userService;
     private final AiClientServer aiClientServer;
+    private final ApplicationEventPublisher eventPublisher;
 
     public Question create(Long sessionId, Long userId, String content, boolean anonymous) {
         Session session = sessionAccess.requireLiveMember(sessionId, userId);
         Question question = questionRepository.save(Question.builder().content(content).session(session)
                 .user(userService.getUser(userId)).anonymous(anonymous).build());
+        eventPublisher.publishEvent(new SessionTopicEvent(sessionId, RealtimeEventType.QUESTION_CREATED,
+                QuestionResponse.from(question, answerRepository)));
         processAsync(question.getId(), sessionId, content);
         return question;
     }
