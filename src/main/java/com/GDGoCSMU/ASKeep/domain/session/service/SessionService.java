@@ -29,7 +29,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Set;
 
 @Service
 @Transactional(readOnly = true)
@@ -68,21 +67,19 @@ public class SessionService {
         return SessionResponse.from(sessionRepository.save(session));
     }
 
-    /** 입장 코드는 내가 발표자이거나 참여한 세션에만 보인다 (나머지는 null) */
+    /** 입장 코드는 그 세션을 연 발표자에게만 보인다 (참여자 포함 나머지는 null) — 팀 결정 */
     public List<SessionResponse> getList(Long userId, SessionStatus status) {
         List<Session> sessions = (status == null)
                 ? sessionRepository.findAllByOrderByCreatedAtDesc()
                 : sessionRepository.findAllByStatusOrderByCreatedAtDesc(status);
-        Set<Long> joined = participantRepository.findSessionIdsByUserId(userId);
         return sessions.stream()
-                .map(s -> SessionResponse.from(s, s.isPresenter(userId) || joined.contains(s.getId())))
+                .map(s -> SessionResponse.from(s, s.isPresenter(userId)))
                 .toList();
     }
 
     public SessionResponse getDetail(Long userId, Long sessionId) {
         Session session = findSession(sessionId);
-        boolean member = session.isPresenter(userId) || participantRepository.existsBySession_IdAndUser_Id(sessionId, userId);
-        return SessionResponse.from(session, member);
+        return SessionResponse.from(session, session.isPresenter(userId));
     }
 
     @Transactional
@@ -115,7 +112,7 @@ public class SessionService {
         }
         if (role == null || role == UserRole.AUDIENCE) {
             sessionRepository.findJoinedByUserId(userId)
-                    .forEach(s -> result.add(new MySessionResponse(UserRole.AUDIENCE.name(), SessionResponse.from(s), null)));
+                    .forEach(s -> result.add(new MySessionResponse(UserRole.AUDIENCE.name(), SessionResponse.from(s, false), null)));
         }
         if (result.isEmpty()) return result;
 
