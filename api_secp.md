@@ -135,7 +135,7 @@
 | 삭제 | `DELETE /sessions/{sessionId}` | 없음 | 200, 데이터 없음 |
 | 시작 | `POST /sessions/{sessionId}/start` | 없음 | 200, `SessionResponse` |
 | 종료 | `POST /sessions/{sessionId}/end` | 없음 | 200, `SessionResponse` |
-| 참여 | `POST /sessions/{sessionId}/participants` | 없음 | 201, `ParticipantResponse` |
+| 참여 | `POST /sessions/participants` | JSON: `entryCode`(필수) | 201, `ParticipantResponse` |
 
 생성 요청 예시:
 
@@ -165,8 +165,18 @@
 - 새 세션 상태는 `READY → ONGOING → ENDED`입니다. 기존 DB의 `ACTIVE`도 진행 중 상태로 읽고 종료할 수 있습니다.
 - 목록은 생성일 내림차순의 전체 세션 배열입니다. `?status=READY`, `?status=ONGOING`, `?status=ACTIVE`, `?status=ENDED`로 필터링할 수 있습니다. 로그인 사용자별 필터와 페이지 처리는 없습니다.
 - 조회·목록은 로그인 사용자에게 열려 있습니다. 수정·삭제·시작·종료는 발표자만 할 수 있습니다. 종료된 세션은 수정할 수 없습니다. 처리 중인 자료가 있는 세션은 삭제할 수 없습니다.
-- `entryCode`는 새 세션에 발급되는 6자리 코드입니다. 현재 참여 API는 이 코드를 요청하거나 검증하지 않습니다. 이전 DB에서 생성된 세션은 `entryCode:null`일 수 있습니다.
-- 발표자는 참여자로 등록할 수 없고, 종료된 세션에도 참여할 수 없습니다. 이미 등록된 참여자가 다시 요청하면 기존 참여 정보를 반환합니다.
+- `entryCode`는 새 세션에 발급되는 6자리 코드입니다(영문 대문자·숫자, 헷갈리는 `0 O 1 I` 제외). 이전 DB에서 생성된 세션은 `entryCode:null`일 수 있으며, 이런 세션에는 참여할 수 없습니다.
+- 참여는 입장 코드로만 합니다. 세션 ID만으로 참여하던 `POST /sessions/{sessionId}/participants`는 삭제되었습니다.
+
+참여 요청 예시: `{"entryCode":"ABC234"}`. 대소문자와 앞뒤 공백은 무시합니다.
+
+| 상황 | 응답 |
+| --- | --- |
+| 형식 오류(영문·숫자 6자리 아님) | 400 `INVALID_INPUT` |
+| 코드에 해당하는 세션 없음 | 404 `INVALID_ENTRY_CODE` |
+| 발표자 본인이 참여 시도 | 409 `PRESENTER_CANNOT_JOIN` |
+| 종료된 세션 | 409 `SESSION_ENDED` |
+| 이미 참여한 사용자가 다시 요청 | 201, 기존 참여 정보 반환 |
 
 `ParticipantResponse`(`data`): `{"sessionId":1,"userId":2,"role":"AUDIENCE"}`.
 
@@ -231,7 +241,7 @@
 
 `author.username`에는 사용자의 `name` 값이 들어갑니다. 익명 질문은 `author:null`입니다. `aiStatus` 값은 `PENDING`, `PROCESSING`, `COMPLETED`, `FAILED`입니다.
 
-- 등록·조회는 세션 발표자 또는 참여자만 가능합니다. 질문 수정은 작성자만, AI 처리가 시작되기 전(`PENDING`)에만 가능합니다.
+- 등록·조회는 세션 발표자 또는 참여자만 가능합니다. 등록은 세션이 진행 중(`ONGOING`)일 때만 가능하며, 시작 전·종료 후에는 409 `SESSION_NOT_IN_PROGRESS`입니다. 질문 수정은 작성자만, AI 처리가 시작되기 전(`PENDING`)에만 가능합니다.
 - 삭제는 작성자 또는 발표자가 할 수 있습니다. AI 답변 재시도는 발표자만, `FAILED` 상태에서만 가능합니다.
 - 일반 목록은 ID 내림차순입니다. Polling은 `afterId`보다 큰 ID를 오름차순으로 최대 100개 반환합니다.
 

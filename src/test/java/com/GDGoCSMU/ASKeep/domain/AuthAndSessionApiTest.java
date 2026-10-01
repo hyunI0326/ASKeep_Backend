@@ -177,6 +177,10 @@ class AuthAndSessionApiTest {
                         .contentType(MediaType.APPLICATION_JSON).content(question))
                 .andExpect(status().isForbidden());
 
+        // 세션 ID만으로 참여하던 기존 API는 삭제됨
+        mvc.perform(post(base + "/participants").header("Authorization", "Bearer " + audience))
+                .andExpect(status().isNotFound());
+
         // 잘못된 코드 (0은 발급하지 않는 문자라 절대 존재하지 않음) / 형식 오류 / 발표자 본인
         mvc.perform(post("/api/v1/sessions/participants").header("Authorization", "Bearer " + audience)
                         .contentType(MediaType.APPLICATION_JSON).content("{\"entryCode\":\"000000\"}"))

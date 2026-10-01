@@ -83,11 +83,6 @@ public class SessionService {
         sessionRepository.delete(session);
     }
 
-    @Transactional
-    public SessionParticipant join(Long userId, Long sessionId) {
-        return join(findSession(sessionId), userId);
-    }
-
     /** 청중이 발표자에게 받은 6자리 입장 코드로 참여한다. 이미 참여했으면 기존 참여 정보를 돌려준다. */
     @Transactional
     public SessionParticipant joinByEntryCode(Long userId, String entryCode) {

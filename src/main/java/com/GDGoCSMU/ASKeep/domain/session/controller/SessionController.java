@@ -70,14 +70,7 @@ public class SessionController {
         return ApiResponse.ok(sessionService.end(loginUser.userId(), sessionId));
     }
 
-    @PostMapping("/{sessionId}/participants")
-    @ResponseStatus(HttpStatus.CREATED)
-    public ApiResponse<ParticipantResponse> join(@AuthenticationPrincipal LoginUser loginUser,
-                                                 @PathVariable Long sessionId) {
-        return ApiResponse.ok(ParticipantResponse.from(sessionService.join(loginUser.userId(), sessionId)));
-    }
-
-    /** POST /api/v1/sessions/participants  {"entryCode":"K7P2QX"} — 입장 코드로 참여 */
+    /** POST /api/v1/sessions/participants  {"entryCode":"K7P2QX"} — 입장 코드로 참여 (참여는 이 방법만 허용) */
     @PostMapping("/participants")
     @ResponseStatus(HttpStatus.CREATED)
     public ApiResponse<ParticipantResponse> joinByEntryCode(@AuthenticationPrincipal LoginUser loginUser,
