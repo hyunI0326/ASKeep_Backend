@@ -13,10 +13,15 @@ import com.GDGoCSMU.ASKeep.domain.user.service.UserService;
 import com.GDGoCSMU.ASKeep.domain.material.MaterialService;
 import com.GDGoCSMU.ASKeep.global.exception.BusinessException;
 import com.GDGoCSMU.ASKeep.global.exception.ErrorCode;
+import com.GDGoCSMU.ASKeep.global.websocket.RealtimeEventType;
+import com.GDGoCSMU.ASKeep.global.websocket.SessionTopicEvent;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 
 @Service
 @Transactional(readOnly = true)
@@ -29,15 +34,18 @@ public class SessionService {
     private final EntryCodeGenerator entryCodeGenerator;
     private final SessionParticipantRepository participantRepository;
     private final MaterialService materialService;
+    private final ApplicationEventPublisher eventPublisher;
 
     public SessionService(SessionRepository sessionRepository, UserService userService,
                           EntryCodeGenerator entryCodeGenerator,
-                          SessionParticipantRepository participantRepository, MaterialService materialService) {
+                          SessionParticipantRepository participantRepository, MaterialService materialService,
+                          ApplicationEventPublisher eventPublisher) {
         this.sessionRepository = sessionRepository;
         this.userService = userService;
         this.entryCodeGenerator = entryCodeGenerator;
         this.participantRepository = participantRepository;
         this.materialService = materialService;
+        this.eventPublisher = eventPublisher;
     }
 
     @Transactional
@@ -77,10 +85,21 @@ public class SessionService {
 
     @Transactional
     public SessionParticipant join(Long userId, Long sessionId) {
-        Session session = findSession(sessionId);
-        if (session.isPresenter(userId)) throw new IllegalStateException("발표자는 참여자로 등록할 수 없습니다.");
-        if (session.getStatus() == SessionStatus.ENDED) throw new IllegalStateException("종료된 세션에는 참여할 수 없습니다.");
-        return participantRepository.findBySession_IdAndUser_Id(sessionId, userId)
+        return join(findSession(sessionId), userId);
+    }
+
+    /** 청중이 발표자에게 받은 6자리 입장 코드로 참여한다. 이미 참여했으면 기존 참여 정보를 돌려준다. */
+    @Transactional
+    public SessionParticipant joinByEntryCode(Long userId, String entryCode) {
+        Session session = sessionRepository.findWithPresenterByEntryCode(entryCode.trim().toUpperCase(Locale.ROOT))
+                .orElseThrow(() -> new BusinessException(ErrorCode.INVALID_ENTRY_CODE));
+        return join(session, userId);
+    }
+
+    private SessionParticipant join(Session session, Long userId) {
+        if (session.isPresenter(userId)) throw new BusinessException(ErrorCode.PRESENTER_CANNOT_JOIN);
+        if (session.getStatus() == SessionStatus.ENDED) throw new BusinessException(ErrorCode.SESSION_ENDED);
+        return participantRepository.findBySession_IdAndUser_Id(session.getId(), userId)
                 .orElseGet(() -> participantRepository.save(new SessionParticipant(session, userService.getUser(userId))));
     }
 
@@ -88,6 +107,7 @@ public class SessionService {
     public SessionResponse start(Long userId, Long sessionId) {
         Session session = findOwnedSession(userId, sessionId);
         session.start();
+        publishStatusChanged(session);
         return SessionResponse.from(session);
     }
 
@@ -95,7 +115,14 @@ public class SessionService {
     public SessionResponse end(Long userId, Long sessionId) {
         Session session = findOwnedSession(userId, sessionId);
         session.end();
+        publishStatusChanged(session);
         return SessionResponse.from(session);
+    }
+
+    /** 커밋된 뒤 /topic/sessions/{id} 구독자에게 SESSION_STATUS_CHANGED 알림이 나간다 (RealtimeBroadcaster) */
+    private void publishStatusChanged(Session session) {
+        eventPublisher.publishEvent(new SessionTopicEvent(session.getId(), RealtimeEventType.SESSION_STATUS_CHANGED,
+                Map.of("status", session.getStatus().name())));
     }
 
     /** 다른 도메인(자료, 질문 등)에서 세션 엔티티가 필요할 때 이 메서드를 쓰면 된다. */

@@ -20,4 +20,7 @@ public interface SessionRepository extends JpaRepository<Session, Long> {
 
     @EntityGraph(attributePaths = "presenter")
     Optional<Session> findWithPresenterById(Long id);
+
+    @EntityGraph(attributePaths = "presenter")
+    Optional<Session> findWithPresenterByEntryCode(String entryCode);
 }

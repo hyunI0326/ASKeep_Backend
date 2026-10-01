@@ -157,6 +157,77 @@ class AuthAndSessionApiTest {
     }
 
     @Test
+    void 입장코드로_참여하고_진행중일때만_질문할수있다() throws Exception {
+        // 사용자 이름(username)이 unique라 테스트마다 다른 이름을 쓴다
+        String presenter = signupAndLogin("발표자-" + UUID.randomUUID().toString().substring(0, 8));
+        String audience = signupAndLogin("청중-" + UUID.randomUUID().toString().substring(0, 8));
+        String late = signupAndLogin("지각-" + UUID.randomUUID().toString().substring(0, 8));
+
+        String created = mvc.perform(post("/api/v1/sessions").header("Authorization", "Bearer " + presenter)
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"title\":\"입장 코드 세션\"}"))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+        Integer id = JsonPath.read(created, "$.data.sessionId");
+        String entryCode = JsonPath.read(created, "$.data.entryCode");
+        String base = "/api/v1/sessions/" + id;
+        String question = "{\"content\":\"질문입니다\",\"anonymous\":false}";
+
+        // 참여 전에는 질문 불가
+        mvc.perform(post(base + "/questions").header("Authorization", "Bearer " + audience)
+                        .contentType(MediaType.APPLICATION_JSON).content(question))
+                .andExpect(status().isForbidden());
+
+        // 잘못된 코드 (0은 발급하지 않는 문자라 절대 존재하지 않음) / 형식 오류 / 발표자 본인
+        mvc.perform(post("/api/v1/sessions/participants").header("Authorization", "Bearer " + audience)
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"entryCode\":\"000000\"}"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.error.code").value("INVALID_ENTRY_CODE"));
+        mvc.perform(post("/api/v1/sessions/participants").header("Authorization", "Bearer " + audience)
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"entryCode\":\"abc\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("INVALID_INPUT"));
+        mvc.perform(post("/api/v1/sessions/participants").header("Authorization", "Bearer " + presenter)
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"entryCode\":\"%s\"}".formatted(entryCode)))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.error.code").value("PRESENTER_CANNOT_JOIN"));
+
+        // 소문자로 입력해도 참여되고, 다시 요청해도 같은 결과
+        for (int i = 0; i < 2; i++) {
+            mvc.perform(post("/api/v1/sessions/participants").header("Authorization", "Bearer " + audience)
+                            .contentType(MediaType.APPLICATION_JSON).content("{\"entryCode\":\" %s \"}".formatted(entryCode.toLowerCase())))
+                    .andExpect(status().isCreated())
+                    .andExpect(jsonPath("$.data.sessionId").value(id))
+                    .andExpect(jsonPath("$.data.role").value("AUDIENCE"));
+        }
+
+        // 시작 전(READY)에는 질문 불가
+        mvc.perform(post(base + "/questions").header("Authorization", "Bearer " + audience)
+                        .contentType(MediaType.APPLICATION_JSON).content(question))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.error.code").value("SESSION_NOT_IN_PROGRESS"));
+
+        // 진행 중(ONGOING)에는 질문 가능
+        mvc.perform(post(base + "/start").header("Authorization", "Bearer " + presenter))
+                .andExpect(status().isOk());
+        mvc.perform(post(base + "/questions").header("Authorization", "Bearer " + audience)
+                        .contentType(MediaType.APPLICATION_JSON).content(question))
+                .andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.data.content").value("질문입니다"));
+
+        // 종료(ENDED) 후에는 질문 불가, 새로 참여도 불가
+        mvc.perform(post(base + "/end").header("Authorization", "Bearer " + presenter))
+                .andExpect(status().isOk());
+        mvc.perform(post(base + "/questions").header("Authorization", "Bearer " + audience)
+                        .contentType(MediaType.APPLICATION_JSON).content(question))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.error.code").value("SESSION_NOT_IN_PROGRESS"));
+        mvc.perform(post("/api/v1/sessions/participants").header("Authorization", "Bearer " + late)
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"entryCode\":\"%s\"}".formatted(entryCode)))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.error.code").value("SESSION_ENDED"));
+    }
+
+    @Test
     void 질문_API도_로그인이_필요하다() throws Exception {
         mvc.perform(get("/api/v1/questions/1")).andExpect(status().isUnauthorized());
     }

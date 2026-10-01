@@ -2,6 +2,7 @@ package com.GDGoCSMU.ASKeep.domain.session.controller;
 
 import com.GDGoCSMU.ASKeep.domain.session.SessionParticipant;
 import com.GDGoCSMU.ASKeep.domain.session.dto.SessionCreateRequest;
+import com.GDGoCSMU.ASKeep.domain.session.dto.SessionJoinRequest;
 import com.GDGoCSMU.ASKeep.domain.session.dto.SessionResponse;
 import com.GDGoCSMU.ASKeep.domain.session.dto.SessionUpdateRequest;
 import com.GDGoCSMU.ASKeep.domain.session.entity.SessionStatus;
@@ -73,9 +74,20 @@ public class SessionController {
     @ResponseStatus(HttpStatus.CREATED)
     public ApiResponse<ParticipantResponse> join(@AuthenticationPrincipal LoginUser loginUser,
                                                  @PathVariable Long sessionId) {
-        SessionParticipant participant = sessionService.join(loginUser.userId(), sessionId);
-        return ApiResponse.ok(new ParticipantResponse(sessionId, participant.getUser().getId(), participant.getRole().name()));
+        return ApiResponse.ok(ParticipantResponse.from(sessionService.join(loginUser.userId(), sessionId)));
     }
 
-    public record ParticipantResponse(Long sessionId, Long userId, String role) {}
+    /** POST /api/v1/sessions/participants  {"entryCode":"K7P2QX"} — 입장 코드로 참여 */
+    @PostMapping("/participants")
+    @ResponseStatus(HttpStatus.CREATED)
+    public ApiResponse<ParticipantResponse> joinByEntryCode(@AuthenticationPrincipal LoginUser loginUser,
+                                                            @Valid @RequestBody SessionJoinRequest request) {
+        return ApiResponse.ok(ParticipantResponse.from(sessionService.joinByEntryCode(loginUser.userId(), request.entryCode())));
+    }
+
+    public record ParticipantResponse(Long sessionId, Long userId, String role) {
+        static ParticipantResponse from(SessionParticipant p) {
+            return new ParticipantResponse(p.getSession().getId(), p.getUser().getId(), p.getRole().name());
+        }
+    }
 }
