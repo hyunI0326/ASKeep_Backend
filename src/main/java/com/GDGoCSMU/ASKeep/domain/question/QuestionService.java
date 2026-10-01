@@ -28,7 +28,7 @@ public class QuestionService {
     private final AiClientServer aiClientServer;
 
     public Question create(Long sessionId, Long userId, String content, boolean anonymous) {
-        Session session = sessionAccess.requireMember(sessionId, userId);
+        Session session = sessionAccess.requireLiveMember(sessionId, userId);
         Question question = questionRepository.save(Question.builder().content(content).session(session)
                 .user(userService.getUser(userId)).anonymous(anonymous).build());
         processAsync(question.getId(), sessionId, content);

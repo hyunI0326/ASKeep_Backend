@@ -24,7 +24,7 @@ public class QuestionController {
     @PostMapping("/sessions/{sessionId}/questions")
     @ResponseStatus(HttpStatus.ACCEPTED)
     ApiResponse<QuestionResponse> create(@PathVariable Long sessionId, @Valid @RequestBody QuestionRequests.Create request) {
-        return ApiResponse.ok(QuestionResponse.from(questionService.create(sessionId, CurrentUser.id(), request.content(), request.anonymous()), answerRepository));
+        return ApiResponse.ok(QuestionResponse.from(questionService.create(sessionId, CurrentUser.id(), request.content(), request.isAnonymous()), answerRepository));
     }
 
     @GetMapping("/sessions/{sessionId}/questions")

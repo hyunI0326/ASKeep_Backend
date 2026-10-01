@@ -2,10 +2,13 @@ package com.GDGoCSMU.ASKeep.domain.session.controller;
 
 import com.GDGoCSMU.ASKeep.domain.session.SessionParticipant;
 import com.GDGoCSMU.ASKeep.domain.session.dto.SessionCreateRequest;
+import com.GDGoCSMU.ASKeep.domain.session.dto.SessionJoinRequest;
 import com.GDGoCSMU.ASKeep.domain.session.dto.SessionResponse;
 import com.GDGoCSMU.ASKeep.domain.session.dto.SessionUpdateRequest;
 import com.GDGoCSMU.ASKeep.domain.session.entity.SessionStatus;
 import com.GDGoCSMU.ASKeep.domain.session.service.SessionService;
+import com.GDGoCSMU.ASKeep.domain.session.service.SessionSummaryService;
+import com.GDGoCSMU.ASKeep.domain.session.dto.SummaryResponse;
 import com.GDGoCSMU.ASKeep.global.common.ApiResponse;
 import com.GDGoCSMU.ASKeep.global.security.LoginUser;
 import jakarta.validation.Valid;
@@ -20,9 +23,11 @@ import java.util.List;
 public class SessionController {
 
     private final SessionService sessionService;
+    private final SessionSummaryService summaryService;
 
-    public SessionController(SessionService sessionService) {
+    public SessionController(SessionService sessionService, SessionSummaryService summaryService) {
         this.sessionService = sessionService;
+        this.summaryService = summaryService;
     }
 
     @PostMapping
@@ -34,13 +39,15 @@ public class SessionController {
 
     /** GET /api/v1/sessions?status=ONGOING 처럼 상태로 거를 수 있다 (생략하면 전체) */
     @GetMapping
-    public ApiResponse<List<SessionResponse>> list(@RequestParam(name = "status", required = false) SessionStatus status) {
-        return ApiResponse.ok(sessionService.getList(status));
+    public ApiResponse<List<SessionResponse>> list(@AuthenticationPrincipal LoginUser loginUser,
+                                                   @RequestParam(name = "status", required = false) SessionStatus status) {
+        return ApiResponse.ok(sessionService.getList(loginUser.userId(), status));
     }
 
     @GetMapping("/{sessionId}")
-    public ApiResponse<SessionResponse> detail(@PathVariable("sessionId") Long sessionId) {
-        return ApiResponse.ok(sessionService.getDetail(sessionId));
+    public ApiResponse<SessionResponse> detail(@AuthenticationPrincipal LoginUser loginUser,
+                                               @PathVariable("sessionId") Long sessionId) {
+        return ApiResponse.ok(sessionService.getDetail(loginUser.userId(), sessionId));
     }
 
     @PatchMapping("/{sessionId}")
@@ -69,13 +76,32 @@ public class SessionController {
         return ApiResponse.ok(sessionService.end(loginUser.userId(), sessionId));
     }
 
-    @PostMapping("/{sessionId}/participants")
+    /** POST /api/v1/sessions/participants  {"entryCode":"K7P2QX"} — 입장 코드로 참여 (참여는 이 방법만 허용) */
+    @PostMapping("/participants")
     @ResponseStatus(HttpStatus.CREATED)
-    public ApiResponse<ParticipantResponse> join(@AuthenticationPrincipal LoginUser loginUser,
-                                                 @PathVariable Long sessionId) {
-        SessionParticipant participant = sessionService.join(loginUser.userId(), sessionId);
-        return ApiResponse.ok(new ParticipantResponse(sessionId, participant.getUser().getId(), participant.getRole().name()));
+    public ApiResponse<ParticipantResponse> joinByEntryCode(@AuthenticationPrincipal LoginUser loginUser,
+                                                            @Valid @RequestBody SessionJoinRequest request) {
+        return ApiResponse.ok(ParticipantResponse.from(sessionService.joinByEntryCode(loginUser.userId(), request.entryCode())));
     }
 
-    public record ParticipantResponse(Long sessionId, Long userId, String role) {}
+    /** 세션 종료 후 AI 요약 (발표자·참여자). 종료 직후엔 PENDING → PROCESSING → COMPLETED/FAILED */
+    @GetMapping("/{sessionId}/summary")
+    public ApiResponse<SummaryResponse> summary(@AuthenticationPrincipal LoginUser loginUser,
+                                                @PathVariable("sessionId") Long sessionId) {
+        return ApiResponse.ok(summaryService.get(loginUser.userId(), sessionId));
+    }
+
+    /** 요약이 FAILED일 때 발표자가 다시 요청 */
+    @PostMapping("/{sessionId}/summary/retry")
+    @ResponseStatus(HttpStatus.ACCEPTED)
+    public ApiResponse<SummaryResponse> retrySummary(@AuthenticationPrincipal LoginUser loginUser,
+                                                     @PathVariable("sessionId") Long sessionId) {
+        return ApiResponse.ok(summaryService.retry(loginUser.userId(), sessionId));
+    }
+
+    public record ParticipantResponse(Long sessionId, Long userId, String role) {
+        static ParticipantResponse from(SessionParticipant p) {
+            return new ParticipantResponse(p.getSession().getId(), p.getUser().getId(), p.getRole().name());
+        }
+    }
 }

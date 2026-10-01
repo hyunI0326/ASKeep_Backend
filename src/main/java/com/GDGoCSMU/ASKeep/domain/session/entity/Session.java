@@ -73,6 +73,11 @@ public class Session {
         return presenter.getId().equals(userId);
     }
 
+    /** 진행 중인 세션인지 (ACTIVE는 기존 데이터의 진행중 상태) */
+    public boolean isLive() {
+        return status == SessionStatus.ONGOING || status == SessionStatus.ACTIVE;
+    }
+
     public void changeTitle(String title) {
         if (status == SessionStatus.ENDED) {
             throw new BusinessException(ErrorCode.SESSION_ALREADY_ENDED);
@@ -96,7 +101,7 @@ public class Session {
     }
 
     public void end() {
-        if (status != SessionStatus.ONGOING && status != SessionStatus.ACTIVE) {
+        if (!isLive()) {
             throw new BusinessException(ErrorCode.SESSION_NOT_IN_PROGRESS);
         }
         this.status = SessionStatus.ENDED;
