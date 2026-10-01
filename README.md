@@ -33,7 +33,7 @@
   ==============================
 
 -`ai-server/main.py`에 `POST /sessions/summary`를 추가했습니다. 기존 `/ai/answer`와 같은 방식(Gemini, 503 재시도)이고 JSON으로 `{ sessionId, summary, tags }`를 돌려줍니다.
-- 로컬에 Python이 없어 직접 실행해 보지 못했습니다. 한번 실행해서 확인 부탁드립니다. (Spring 쪽은 가짜 AI 서버로 테스트 완료)
+-  한번 실행해서 확인 부탁드립니다. (Spring 쪽은 가짜 AI 서버로 테스트 완료)
 - `AiClientServer`에 `summarize()` 메서드를 추가했습니다.
 
   프론트(참고)
