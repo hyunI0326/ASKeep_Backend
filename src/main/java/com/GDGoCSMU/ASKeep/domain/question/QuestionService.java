@@ -1,5 +1,7 @@
 package com.GDGoCSMU.ASKeep.domain.question;
 
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.transaction.support.TransactionTemplate;
 import com.GDGoCSMU.ASKeep.global.websocket.RealtimeEventType;
 import com.GDGoCSMU.ASKeep.global.websocket.SessionTopicEvent;
 import org.springframework.context.ApplicationEventPublisher;
@@ -21,6 +23,7 @@ import org.springframework.stereotype.Service;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class QuestionService {
@@ -30,6 +33,7 @@ public class QuestionService {
     private final UserService userService;
     private final AiClientServer aiClientServer;
     private final ApplicationEventPublisher eventPublisher;
+    private final TransactionTemplate transactionTemplate;
 
     public Question create(Long sessionId, Long userId, String content, boolean anonymous) {
         Session session = sessionAccess.requireLiveMember(sessionId, userId);
@@ -131,15 +135,33 @@ public class QuestionService {
             if (question == null) return;
             question.startAiProcessing();
             questionRepository.save(question);
+            publishUpdated(questionId, sessionId);
             try {
                 AiAnswerResponse result = aiClientServer.answer(new AiAnswerRequest(sessionId, content));
                 if (result == null || result.answer() == null || result.answer().isBlank()) throw new IllegalStateException("AI 답변이 비어 있습니다.");
                 answerRepository.save(Answer.builder().content(result.answer()).type(AnswerType.AI).question(question).author(null).build());
                 question.completeAiProcessing();
             } catch (Exception exception) {
+                log.warn("AI 답변 생성 실패 questionId={}", questionId, exception);
                 question.failAiProcessing();
             }
             questionRepository.save(question);
+            publishUpdated(questionId, sessionId);
         });
+    }
+
+    /** 질문의 최신 상태(답변 포함)를 QUESTION_UPDATED로 보낸다. 비동기 스레드에서도 안전하게 동작한다. */
+    private void publishUpdated(Long questionId, Long sessionId) {
+        try {
+            QuestionResponse response = transactionTemplate.execute(status ->
+                    questionRepository.findById(questionId)
+                            .map(question -> QuestionResponse.from(question, answerRepository))
+                            .orElse(null));
+            if (response != null) {
+                eventPublisher.publishEvent(new SessionTopicEvent(sessionId, RealtimeEventType.QUESTION_UPDATED, response));
+            }
+        } catch (Exception exception) {
+            log.warn("질문 알림 발송 실패 questionId={}", questionId, exception);
+        }
     }
 }

@@ -75,6 +75,30 @@ class QuestionRealtimeTest {
         assertNotNull(data.get("id"));
     }
 
+    @Test
+    void AI_처리_상태가_바뀌면_QUESTION_UPDATED_알림이_간다() throws Exception {
+        String presenter = signupAndLogin();
+        String audience = signupAndLogin();
+        long sessionId = createSession(presenter);
+        String entryCode = JsonPath.read(get("/api/v1/sessions/" + sessionId, presenter), "$.data.entryCode");
+        post("/api/v1/sessions/participants", audience, "{\"entryCode\":\"%s\"}".formatted(entryCode));
+        post("/api/v1/sessions/" + sessionId + "/start", presenter, null);
+
+        BlockingQueue<String> received = subscribe(audience, sessionId);
+
+        // 익명이 아닌 질문: 비동기 스레드에서도 작성자 정보를 문제없이 읽는지 함께 확인
+        post("/api/v1/sessions/" + sessionId + "/questions", audience,
+                "{\"content\":\"어텐션은 왜 필요한가요?\",\"anonymous\":false}");
+
+        // 테스트에는 AI 서버가 없으므로 PROCESSING → FAILED 순서로 알림이 와야 한다
+        assertNotNull(waitForAiStatus(received, "PROCESSING"));
+        String failed = waitForAiStatus(received, "FAILED");
+
+        Map<String, Object> data = JsonPath.read(failed, "$.data");
+        assertEquals("어텐션은 왜 필요한가요?", data.get("content"));
+        assertNotNull(data.get("author"), "익명이 아닌 질문은 작성자가 보여야 합니다");
+    }
+
     // --- helpers ---
 
     /** 웹소켓 연결 후 세션 주소를 구독하고, 받은 알림을 쌓아두는 큐를 돌려준다. */
@@ -102,6 +126,19 @@ class QuestionRealtimeTest {
             if (message != null && type.equals(JsonPath.read(message, "$.type"))) return message;
         }
         fail(type + " 알림을 받지 못했습니다");
+        return null;
+    }
+
+    /** QUESTION_UPDATED 중 aiStatus가 원하는 값인 알림이 올 때까지 최대 5초 기다린다. */
+    private String waitForAiStatus(BlockingQueue<String> received, String aiStatus) throws Exception {
+        long deadline = System.currentTimeMillis() + 5000;
+        while (System.currentTimeMillis() < deadline) {
+            String message = received.poll(500, TimeUnit.MILLISECONDS);
+            if (message == null) continue;
+            if ("QUESTION_UPDATED".equals(JsonPath.read(message, "$.type"))
+                    && aiStatus.equals(JsonPath.read(message, "$.data.aiStatus"))) return message;
+        }
+        fail("aiStatus=" + aiStatus + " 알림을 받지 못했습니다");
         return null;
     }
 
