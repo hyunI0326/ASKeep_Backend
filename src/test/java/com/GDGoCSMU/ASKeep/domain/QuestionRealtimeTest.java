@@ -1,5 +1,7 @@
 package com.GDGoCSMU.ASKeep.domain;
 
+import java.util.List;
+import java.util.function.Predicate;
 import com.jayway.jsonpath.JsonPath;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -99,6 +101,47 @@ class QuestionRealtimeTest {
         assertNotNull(data.get("author"), "익명이 아닌 질문은 작성자가 보여야 합니다");
     }
 
+        @Test
+    void 질문을_삭제하면_QUESTION_DELETED_알림이_간다() throws Exception {
+        LiveSession live = startLiveSession();
+        BlockingQueue<String> received = subscribe(live.audience(), live.sessionId());
+        int questionId = postQuestion(live, "지울 질문입니다");
+
+        delete("/api/v1/questions/" + questionId, live.audience());
+
+        String message = waitUntil(received,
+                m -> "QUESTION_DELETED".equals(JsonPath.read(m, "$.type")), "QUESTION_DELETED");
+        assertEquals(questionId, (int) JsonPath.read(message, "$.data.questionId"));
+    }
+
+    @Test
+    void 발표자가_답변하면_답변이_포함된_QUESTION_UPDATED_알림이_간다() throws Exception {
+        LiveSession live = startLiveSession();
+        BlockingQueue<String> received = subscribe(live.audience(), live.sessionId());
+        int questionId = postQuestion(live, "발표자님 의견이 궁금합니다");
+
+        post("/api/v1/questions/" + questionId + "/answers", live.presenter(), "{\"content\":\"발표자 답변입니다\"}");
+
+        String message = waitUntil(received,
+                m -> "QUESTION_UPDATED".equals(JsonPath.read(m, "$.type"))
+                        && !((List<?>) JsonPath.read(m, "$.data.answers[?(@.type == 'PRESENTER')]")).isEmpty(),
+                "발표자 답변이 포함된 QUESTION_UPDATED");
+        assertEquals(questionId, (int) JsonPath.read(message, "$.data.id"));
+    }
+
+    @Test
+    void 실패한_AI_답변을_재시도하면_PENDING_알림이_간다() throws Exception {
+        LiveSession live = startLiveSession();
+        BlockingQueue<String> received = subscribe(live.audience(), live.sessionId());
+        int questionId = postQuestion(live, "재시도할 질문입니다");
+        waitForAiStatus(received, "FAILED");  // 테스트엔 AI 서버가 없어서 먼저 실패한다
+
+        post("/api/v1/questions/" + questionId + "/ai-answer/retry", live.presenter(), null);
+
+        String message = waitForAiStatus(received, "PENDING");
+        assertEquals(questionId, (int) JsonPath.read(message, "$.data.id"));
+    }
+
     // --- helpers ---
 
     /** 웹소켓 연결 후 세션 주소를 구독하고, 받은 알림을 쌓아두는 큐를 돌려준다. */
@@ -140,6 +183,40 @@ class QuestionRealtimeTest {
         }
         fail("aiStatus=" + aiStatus + " 알림을 받지 못했습니다");
         return null;
+    }
+
+    private record LiveSession(String presenter, String audience, long sessionId) {}
+
+    /** 발표자·청자를 만들고, 청자가 입장 코드로 참여한 뒤 세션을 시작한 상태를 돌려준다. */
+    private LiveSession startLiveSession() throws Exception {
+        String presenter = signupAndLogin();
+        String audience = signupAndLogin();
+        long sessionId = createSession(presenter);
+        String entryCode = JsonPath.read(get("/api/v1/sessions/" + sessionId, presenter), "$.data.entryCode");
+        post("/api/v1/sessions/participants", audience, "{\"entryCode\":\"%s\"}".formatted(entryCode));
+        post("/api/v1/sessions/" + sessionId + "/start", presenter, null);
+        return new LiveSession(presenter, audience, sessionId);
+    }
+
+    /** 청자가 질문을 등록하고 질문 번호를 돌려준다. */
+    private int postQuestion(LiveSession live, String content) throws Exception {
+        return JsonPath.read(post("/api/v1/sessions/" + live.sessionId() + "/questions", live.audience(),
+                "{\"content\":\"%s\",\"anonymous\":false}".formatted(content)), "$.data.id");
+    }
+
+    /** 조건에 맞는 알림이 올 때까지 최대 5초 기다린다. */
+    private String waitUntil(BlockingQueue<String> received, Predicate<String> condition, String description) throws Exception {
+        long deadline = System.currentTimeMillis() + 5000;
+        while (System.currentTimeMillis() < deadline) {
+            String message = received.poll(500, TimeUnit.MILLISECONDS);
+            if (message != null && condition.test(message)) return message;
+        }
+        fail(description + " 알림을 받지 못했습니다");
+        return null;
+    }
+
+    private String delete(String path, String token) throws Exception {
+        return send(HttpRequest.newBuilder(uri(path)).header("Authorization", "Bearer " + token).DELETE());
     }
 
     private String signupAndLogin() throws Exception {

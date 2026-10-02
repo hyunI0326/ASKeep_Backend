@@ -22,6 +22,7 @@ import org.springframework.stereotype.Service;
 
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.Map;
 
 @Slf4j
 @Service
@@ -70,14 +71,18 @@ public class QuestionService {
             question.setContent(request.content());
         }
         if (request.anonymous() != null) question.setAnonymous(request.anonymous());
-        return questionRepository.save(question);
+        Question saved = questionRepository.save(question);
+        publishUpdated(saved.getId(), saved.getSession().getId());
+        return saved;
     }
 
     public void delete(Long id, Long userId) {
         Question question = get(id, userId);
         boolean host = question.getSession().isPresenter(userId);
         if (!host && !question.getUser().getId().equals(userId)) throw new org.springframework.security.access.AccessDeniedException("질문 작성자 또는 host만 삭제할 수 있습니다.");
+        Long sessionId = question.getSession().getId();
         questionRepository.delete(question);
+        eventPublisher.publishEvent(new SessionTopicEvent(sessionId, RealtimeEventType.QUESTION_DELETED, Map.of("questionId", id)));
     }
 
     public Question retry(Long id, Long userId) {
@@ -85,6 +90,7 @@ public class QuestionService {
         sessionAccess.requireHost(question.getSession().getId(), userId);
         question.retryAiProcessing();
         questionRepository.save(question);
+        publishUpdated(question.getId(), question.getSession().getId());
         processAsync(question.getId(), question.getSession().getId(), question.getContent());
         return question;
     }
@@ -93,8 +99,10 @@ public class QuestionService {
         Question question = get(questionId, userId);
         sessionAccess.requireHost(question.getSession().getId(), userId);
         if (content == null || content.isBlank()) throw new IllegalArgumentException("content는 비어 있을 수 없습니다.");
-        return answerRepository.save(Answer.builder().content(content).type(AnswerType.PRESENTER)
+        Answer saved = answerRepository.save(Answer.builder().content(content).type(AnswerType.PRESENTER)
                 .question(question).author(userService.getUser(userId)).build());
+        publishUpdated(questionId, question.getSession().getId());
+        return saved;
     }
 
     public List<Answer> answers(Long questionId, Long userId) {
@@ -104,17 +112,22 @@ public class QuestionService {
 
     public Answer updateAnswer(Long answerId, Long userId, String content) {
         Answer answer = answerRepository.findById(answerId).orElseThrow(() -> new EntityNotFoundException("답변을 찾을 수 없습니다."));
-        sessionAccess.requireMember(answer.getQuestion().getSession().getId(), userId);
+        Long questionId = answer.getQuestion().getId();
+        Long sessionId = answer.getQuestion().getSession().getId();
+        sessionAccess.requireMember(sessionId, userId);
         if (answer.getType() != AnswerType.PRESENTER || answer.getAuthor() == null || !answer.getAuthor().getId().equals(userId)) {
             throw new org.springframework.security.access.AccessDeniedException("작성한 발표자 답변만 수정할 수 있습니다.");
         }
         if (content == null || content.isBlank()) throw new IllegalArgumentException("content는 비어 있을 수 없습니다.");
         answer.setContent(content);
-        return answerRepository.save(answer);
+        Answer saved = answerRepository.save(answer);
+        publishUpdated(questionId, sessionId);
+        return saved;
     }
 
     public void deleteAnswer(Long answerId, Long userId) {
         Answer answer = answerRepository.findById(answerId).orElseThrow(() -> new EntityNotFoundException("답변을 찾을 수 없습니다."));
+        Long questionId = answer.getQuestion().getId();
         Long sessionId = answer.getQuestion().getSession().getId();
         sessionAccess.requireMember(sessionId, userId);
         boolean host = answer.getQuestion().getSession().isPresenter(userId);
@@ -122,6 +135,7 @@ public class QuestionService {
         if (!host && !author) throw new org.springframework.security.access.AccessDeniedException("작성자 또는 host만 삭제할 수 있습니다.");
         if (answer.getType() == AnswerType.AI && !host) throw new org.springframework.security.access.AccessDeniedException("AI 답변은 host만 삭제할 수 있습니다.");
         answerRepository.delete(answer);
+        publishUpdated(questionId, sessionId);
     }
 
     private Question find(Long id) {
