@@ -41,7 +41,7 @@ public class QuestionService {
         Question question = questionRepository.save(Question.builder().content(content).session(session)
                 .user(userService.getUser(userId)).anonymous(anonymous).build());
         eventPublisher.publishEvent(new SessionTopicEvent(sessionId, RealtimeEventType.QUESTION_CREATED,
-                QuestionResponse.from(question, answerRepository)));
+                QuestionResponse.forBroadcast(question, answerRepository)));
         processAsync(question.getId(), sessionId, content);
         return question;
     }
@@ -169,7 +169,7 @@ public class QuestionService {
         try {
             QuestionResponse response = transactionTemplate.execute(status ->
                     questionRepository.findById(questionId)
-                            .map(question -> QuestionResponse.from(question, answerRepository))
+                            .map(question -> QuestionResponse.forBroadcast(question, answerRepository))
                             .orElse(null));
             if (response != null) {
                 eventPublisher.publishEvent(new SessionTopicEvent(sessionId, RealtimeEventType.QUESTION_UPDATED, response));
