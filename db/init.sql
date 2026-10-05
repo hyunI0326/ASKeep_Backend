@@ -8,5 +8,5 @@ CREATE TABLE IF NOT EXISTS material_chunks (
     content TEXT NOT NULL,
     page_number INTEGER,
     embedding VECTOR(384),
-    create_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );

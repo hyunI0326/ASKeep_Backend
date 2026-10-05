@@ -1,18 +1,28 @@
 services:
   postgres:
     image: pgvector/pgvector:pg17
+    container_name: askeep-postgres
+
     environment:
       POSTGRES_DB: askeep
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: password
+
     ports:
       - "5432:5432"
+
     volumes:
+      # PostgreSQL 데이터 유지
       - postgres_data:/var/lib/postgresql/data
+
+      # 최초 DB 생성 시 pgvector / material_chunks 초기화
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d askeep"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
 volumes:
   postgres_data:
-
-ai:
-  server:
-    base-url: http://ai-server:8000
