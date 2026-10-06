@@ -57,3 +57,81 @@
   });
   client.activate();
   ```
+
+
+==============================
+
+## feature/question-realtime — 질문 실시간 알림
+
+정헌님 웹소켓(`SessionTopicEvent`) 위에 질문·답변 알림을 연결한 브랜치입니다.
+
+### 알림 종류
+
+| 상황 | 알림 | `data` |
+|---|---|---|
+| 질문 등록 | `QUESTION_CREATED` | 질문 객체 (`aiStatus: PENDING`) |
+| AI 답변 생성 시작 | `QUESTION_UPDATED` | 질문 객체 (`aiStatus: PROCESSING`) |
+| AI 답변 완료 | `QUESTION_UPDATED` | 질문 객체 (`aiStatus: COMPLETED`, `answers`에 AI 답변 포함) |
+| AI 답변 실패 | `QUESTION_UPDATED` | 질문 객체 (`aiStatus: FAILED`) |
+| AI 재시도 | `QUESTION_UPDATED` | 질문 객체 (`aiStatus: PENDING`) |
+| 질문 수정 | `QUESTION_UPDATED` | 질문 객체 |
+| 질문 삭제 | `QUESTION_DELETED` | `{ "questionId": 1 }` |
+| 발표자 답변 등록·수정·삭제 | `QUESTION_UPDATED` | 질문 객체 (바뀐 `answers` 포함) |
+
+### 질문 객체 (`data`)
+
+REST 질문 조회 응답(`QuestionResponse`)과 같은 형식입니다.
+
+```json
+{
+  "id": 1,
+  "sessionId": 3,
+  "content": "어텐션은 왜 필요한가요?",
+  "anonymous": false,
+  "author": { "id": 7, "username": "민식" },
+  "aiStatus": "COMPLETED",
+  "answers": [
+    { "id": 5, "questionId": 1, "content": "AI 답변 내용", "type": "AI", "author": null, "createdAt": "2026-10-01T22:30:05" }
+  ],
+  "createdAt": "2026-10-01T22:30:00",
+  "updatedAt": "2026-10-01T22:30:05"
+}
+```
+
+- 익명 질문은 알림에서 `author`가 항상 `null`입니다 (모든 구독자에게 같은 메시지가 가기 때문)
+- AI 답변의 `author`는 항상 `null`입니다
+
+### 프론트 참고
+
+- 질문 하나에 알림이 여러 번 옵니다: `CREATED` → `UPDATED(PROCESSING)` → `UPDATED(COMPLETED 또는 FAILED)`
+- `QUESTION_CREATED` / `QUESTION_UPDATED`: 같은 `id`가 없으면 추가, 있으면 **`updatedAt`이 더 최신일 때만 통째로 교체**. 순서가 뒤바뀌어 와도 오래된 내용이 덮어쓰지 않습니다
+- `QUESTION_DELETED`: `data.questionId`에 해당하는 질문을 목록에서 제거
+- 로컬에서 AI 서버를 안 켜면 AI 단계는 항상 `FAILED`로 끝납니다 (정상)
+
+### 백엔드 변경
+
+- `QuestionService`
+  - `create()`: 질문 저장 직후 `QUESTION_CREATED` 발행 (AI 처리 시작보다 먼저 보내서 순서 보장)
+  - `processAsync()`: AI 상태가 바뀔 때마다 `QUESTION_UPDATED` 발행, 실패 시 `log.warn` 추가 (기존엔 실패해도 로그가 없었음)
+  - `update()`, `retry()`, `answer()`, `updateAnswer()`, `deleteAnswer()`: 처리 후 `QUESTION_UPDATED` 발행
+  - `delete()`: 삭제 전 세션 번호를 챙겨두고, 삭제 후 `QUESTION_DELETED` 발행
+  - `publishUpdated()` 추가: 비동기 스레드에서는 DB 연결이 닫혀 있어 작성자 정보를 못 읽는 문제가 있어, `TransactionTemplate`으로 조회 후 발행
+- 권한 확인 등 기존 로직은 변경 없습니다
+
+### 테스트
+
+`src/test/.../domain/QuestionRealtimeTest.java` (H2 사용, DB 설치 불필요)
+
+- 질문 등록 → `QUESTION_CREATED`, 익명이면 `author` 가려짐
+- AI 처리 → `PROCESSING` → `FAILED` 순서로 `QUESTION_UPDATED` (익명 아닌 질문으로 작성자 정보 확인)
+- 질문 삭제 → `QUESTION_DELETED`
+- 발표자 답변 → 답변이 포함된 `QUESTION_UPDATED`
+- 실패한 AI 재시도 → `PENDING` 알림
+
+```
+.\gradlew.bat test --tests "com.GDGoCSMU.ASKeep.domain.QuestionRealtimeTest"
+```
+
+### 논의 필요
+
+- 질문 수정이 AI 처리 전(`PENDING`)에만 가능한데, AI가 등록 직후 바로 시작돼서 실제로는 수정이 거의 불가능합니다. 수정 기능을 빼거나, 수정 시 AI를 다시 돌리는 방식으로 수정이 필요함.
