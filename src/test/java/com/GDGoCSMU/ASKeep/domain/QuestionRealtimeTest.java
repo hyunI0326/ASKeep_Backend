@@ -75,6 +75,7 @@ class QuestionRealtimeTest {
         assertEquals(true, data.get("anonymous"));
         assertNull(data.get("author"), "익명 질문의 작성자는 알림에서 가려져야 합니다");
         assertNotNull(data.get("id"));
+        assertFalse(data.containsKey("mine"), "알림에는 mine이 없어야 합니다");
     }
 
     @Test
@@ -140,6 +141,35 @@ class QuestionRealtimeTest {
 
         String message = waitForAiStatus(received, "PENDING");
         assertEquals(questionId, (int) JsonPath.read(message, "$.data.id"));
+    }
+
+    @Test
+    void 익명_질문_작성자는_발표자와_본인에게만_보이고_mine으로_내_질문을_구분한다() throws Exception {
+        String presenter = signupAndLogin();
+        String author = signupAndLogin();
+        String other = signupAndLogin();
+        long sessionId = createSession(presenter);
+        String entryCode = JsonPath.read(get("/api/v1/sessions/" + sessionId, presenter), "$.data.entryCode");
+        post("/api/v1/sessions/participants", author, "{\"entryCode\":\"%s\"}".formatted(entryCode));
+        post("/api/v1/sessions/participants", other, "{\"entryCode\":\"%s\"}".formatted(entryCode));
+        post("/api/v1/sessions/" + sessionId + "/start", presenter, null);
+
+        int questionId = JsonPath.read(post("/api/v1/sessions/" + sessionId + "/questions", author,
+                "{\"content\":\"익명 질문입니다\",\"anonymous\":true}"), "$.data.id");
+        String path = "/api/v1/questions/" + questionId;
+
+        Map<String, Object> byPresenter = JsonPath.read(get(path, presenter), "$.data");
+        Map<String, Object> byAuthor = JsonPath.read(get(path, author), "$.data");
+        Map<String, Object> byOther = JsonPath.read(get(path, other), "$.data");
+
+        assertNotNull(byPresenter.get("author"), "발표자는 익명 질문 작성자를 볼 수 있어야 합니다");
+        assertEquals(false, byPresenter.get("mine"));
+
+        assertNotNull(byAuthor.get("author"), "작성자 본인은 자기 이름을 볼 수 있어야 합니다");
+        assertEquals(true, byAuthor.get("mine"));
+
+        assertNull(byOther.get("author"), "다른 참여자에게는 익명 질문 작성자가 가려져야 합니다");
+        assertEquals(false, byOther.get("mine"));
     }
 
     // --- helpers ---
