@@ -14,5 +14,6 @@ WORKDIR /app
 COPY --from=build /app/app.jar app.jar
 # 무료 서버 메모리(512MB)에 맞춰 Java가 쓸 메모리를 제한
 ENV JAVA_TOOL_OPTIONS="-Xmx300m -XX:+UseSerialGC"
+ENV TZ=Asia/Seoul
 EXPOSE 8080
 ENTRYPOINT ["java", "-jar", "app.jar"]
