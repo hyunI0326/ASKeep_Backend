@@ -24,32 +24,37 @@ public class QuestionController {
     @PostMapping("/sessions/{sessionId}/questions")
     @ResponseStatus(HttpStatus.ACCEPTED)
     ApiResponse<QuestionResponse> create(@PathVariable Long sessionId, @Valid @RequestBody QuestionRequests.Create request) {
-        return ApiResponse.ok(QuestionResponse.from(questionService.create(sessionId, CurrentUser.id(), request.content(), request.isAnonymous()), answerRepository));
+        Long viewerId = CurrentUser.id();
+        Question question = questionService.create(sessionId, viewerId, request.content(), request.isAnonymous());
+        return ApiResponse.ok(QuestionResponse.forViewer(question, answerRepository, viewerId));
     }
 
     @GetMapping("/sessions/{sessionId}/questions")
     ApiResponse<?> list(@PathVariable Long sessionId, @RequestParam(required = false) Long afterId,
                 @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "20") int size) {
+        Long viewerId = CurrentUser.id();
         if (afterId != null) {
             if (afterId < 0) throw new IllegalArgumentException("afterId는 0 이상이어야 합니다.");
-            List<QuestionResponse> items = questionService.after(sessionId, CurrentUser.id(), afterId).stream()
-                    .map(question -> QuestionResponse.from(question, answerRepository)).toList();
+            List<QuestionResponse> items = questionService.after(sessionId, viewerId, afterId).stream()
+                    .map(question -> QuestionResponse.forViewer(question, answerRepository, viewerId)).toList();
             long next = items.isEmpty() ? afterId : items.getLast().id();
             return ApiResponse.ok(Map.of("items", items, "nextAfterId", next));
         }
         validatePage(page, size);
-        var results = questionService.list(sessionId, CurrentUser.id(), PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "id")));
-        return ApiResponse.ok(PageResponse.from(results, question -> QuestionResponse.from(question, answerRepository)));
+        var results = questionService.list(sessionId, viewerId, PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "id")));
+        return ApiResponse.ok(PageResponse.from(results, question -> QuestionResponse.forViewer(question, answerRepository, viewerId)));
     }
 
     @GetMapping("/questions/{questionId}")
     ApiResponse<QuestionResponse> get(@PathVariable Long questionId) {
-        return ApiResponse.ok(QuestionResponse.from(questionService.get(questionId, CurrentUser.id()), answerRepository));
+        Long viewerId = CurrentUser.id();
+        return ApiResponse.ok(QuestionResponse.forViewer(questionService.get(questionId, viewerId), answerRepository, viewerId));
     }
 
     @PatchMapping("/questions/{questionId}")
     ApiResponse<QuestionResponse> update(@PathVariable Long questionId, @RequestBody QuestionRequests.Update request) {
-        return ApiResponse.ok(QuestionResponse.from(questionService.update(questionId, CurrentUser.id(), request), answerRepository));
+        Long viewerId = CurrentUser.id();
+        return ApiResponse.ok(QuestionResponse.forViewer(questionService.update(questionId, viewerId, request), answerRepository, viewerId));
     }
 
     @DeleteMapping("/questions/{questionId}")
@@ -61,7 +66,8 @@ public class QuestionController {
     @PostMapping("/questions/{questionId}/ai-answer/retry")
     @ResponseStatus(HttpStatus.ACCEPTED)
     ApiResponse<QuestionResponse> retry(@PathVariable Long questionId) {
-        return ApiResponse.ok(QuestionResponse.from(questionService.retry(questionId, CurrentUser.id()), answerRepository));
+        Long viewerId = CurrentUser.id();
+        return ApiResponse.ok(QuestionResponse.forViewer(questionService.retry(questionId, viewerId), answerRepository, viewerId));
     }
 
     private void validatePage(int page, int size) {
