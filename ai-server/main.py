@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 import fitz
 import psycopg
@@ -6,7 +6,6 @@ from sentence_transformers import SentenceTransformer
 from pgvector.psycopg import register_vector
 from pgvector import Vector
 import os
-from pathlib import Path
 from dotenv import load_dotenv
 from google import genai
 from google.genai.errors import ServerError
@@ -15,10 +14,6 @@ import json
 from typing import List, Optional
 
 
-class DocumentRequest(BaseModel) :
-    materialId : int
-    sessionId : int
-    filePath : str
 class QuestionRequest(BaseModel):
     sessionId : int
     question : str
@@ -39,27 +34,15 @@ class SummaryRequest(BaseModel):
     description: Optional[str] = None
     questions: List[SummaryQuestion] = []
 
-#업로드 폴더 밖의 경로 접근 차단
-def resolve_upload_path(file_path: str) -> Path:
-    upload_dir = Path(os.getenv("UPLOAD_DIR", "./uploads")).resolve()
-    path = Path(file_path).resolve()
-    if not path.is_relative_to(upload_dir):
-        raise HTTPException(status_code=400, detail="허용되지 않은 경로입니다.")
-    if path.suffix.lower() != ".pdf" or not path.is_file():
-        raise HTTPException(status_code=400, detail="PDF 파일이 아닙니다.")
-    return path
-
 # page별 text 분할
-def extract_pdf(file_path: str):
-    doc = fitz.open(file_path)
+def extract_pdf(pdf: bytes):
     pages = []
-    for page_number, page in enumerate(doc):
-        text = page.get_text()
-        pages.append({
-            "pageNumber" : page_number+1,
-            "text" : text
-        })
-    doc.close()
+    with fitz.open(stream=pdf, filetype="pdf") as doc:
+        for page_number, page in enumerate(doc):
+            pages.append({
+                "pageNumber": page_number + 1,
+                "text": page.get_text()
+            })
     return pages
 
 #text를 chunk로 분할
@@ -274,9 +257,20 @@ def health() :
 
 
 @app.post("/documents/process")
-def process_document(request: DocumentRequest):
+def process_document(
+    materialId: int = Form(..., gt=0),
+    sessionId: int = Form(..., gt=0),
+    file: UploadFile = File(...),
+):
     try:
-        pages = extract_pdf(resolve_upload_path(request.filePath))
+        if not file.filename or not file.filename.lower().endswith(".pdf"):
+            raise HTTPException(status_code=415, detail="PDF 파일만 업로드할 수 있습니다.")
+        pdf = file.file.read(50 * 1024 * 1024 + 1)
+        if len(pdf) > 50 * 1024 * 1024:
+            raise HTTPException(status_code=413, detail="파일은 50MB 이하여야 합니다.")
+        if not pdf.startswith(b"%PDF-"):
+            raise HTTPException(status_code=415, detail="유효한 PDF 파일이 아닙니다.")
+        pages = extract_pdf(pdf)
         result_chunk = []
         chunk_index = 0
         for page in pages:
@@ -286,23 +280,28 @@ def process_document(request: DocumentRequest):
             chunks = split_text(text)
             for chunk in chunks:
                 result_chunk.append({
-                    "materialId": request.materialId,
-                    "sessionId": request.sessionId,
+                    "materialId": materialId,
+                    "sessionId": sessionId,
                     "pageNumber": page["pageNumber"],
                     "chunkIndex": chunk_index,
                     "text": chunk
                 })
                 chunk_index+=1
 
-        save_chunks(result_chunk, request.materialId)
+        if not result_chunk:
+            raise HTTPException(status_code=422, detail="PDF에서 추출할 텍스트가 없습니다.")
+        save_chunks(result_chunk, materialId)
 
         return {
+            "materialId": materialId,
             "status": "success",
             "chunkCount": len(result_chunk)
         }
 
     except HTTPException:
         raise
+    except fitz.FileDataError as e:
+        raise HTTPException(status_code=400, detail="PDF 파일을 읽을 수 없습니다.") from e
     except Exception as e:
         print("ERROR:", type(e).__name__, str(e))
         raise HTTPException(status_code=500, detail=str(e))

@@ -450,23 +450,16 @@ POST /documents/process
 
 PDF를 읽고 페이지별 텍스트를 추출한 뒤 Chunk로 분할하여 PostgreSQL에 저장합니다.
 
-Request:
+Request (`multipart/form-data`):
 
-```json
-{
-  "materialId": 1,
-  "sessionId": 1,
-  "filePath": "/Users/user/Documents/test.pdf"
-}
+```bash
+curl -X POST http://localhost:8000/documents/process \
+  -F materialId=1 -F sessionId=1 -F file=@lecture.pdf
 ```
 
-현재 로컬 개발 환경에서는 실제 PDF 파일의 **절대 경로**를 사용합니다.
-
-예:
-
-```text
-/Users/user/Documents/test.pdf
-```
+`materialId`와 `sessionId`는 양의 정수이며 `file`은 최대 50MB의 PDF입니다.
+JSON `filePath` 요청은 더 이상 받지 않습니다. 확장자, PDF 헤더, 크기를 검증하고
+수신한 파일 내용을 메모리에서 읽어 처리합니다. 텍스트가 없는 PDF는 422를 반환합니다.
 
 처리 과정:
 
@@ -489,9 +482,7 @@ Response 예:
 ```json
 {
   "materialId": 1,
-  "sessionId": 1,
-  "status": "COMPLETED",
-  "pageCount": 10,
+  "status": "success",
   "chunkCount": 24
 }
 ```
@@ -503,23 +494,14 @@ Response 예:
 PDF 처리는 `PyMuPDF(fitz)`를 사용합니다.
 
 ```python
-def extract_pdf(file_path: str):
-
-    doc = fitz.open(file_path)
-
+def extract_pdf(pdf: bytes):
     pages = []
-
-    for page_number, page in enumerate(doc):
-
-        text = page.get_text()
-
-        pages.append({
-            "pageNumber": page_number + 1,
-            "text": text
-        })
-
-    doc.close()
-
+    with fitz.open(stream=pdf, filetype="pdf") as doc:
+        for page_number, page in enumerate(doc):
+            pages.append({
+                "pageNumber": page_number + 1,
+                "text": page.get_text()
+            })
     return pages
 ```
 
@@ -617,47 +599,25 @@ Spring Boot
 FastAPI
 ```
 
-Spring Boot가 Material 정보를 생성한 후 FastAPI에 다음 정보를 전달할 예정입니다.
-
-```json
-{
-  "materialId": 1,
-  "sessionId": 3,
-  "filePath": "/uploads/lecture.pdf"
-}
-```
+Spring Boot가 Material을 저장한 후 `materialId`, `sessionId`, PDF 파일 `file`을
+multipart로 전달합니다. 업로드와 실패 후 재시도가 같은 전송 경로를 사용합니다.
 
 FastAPI는 해당 자료를 처리하여 `material_chunks`에 저장합니다.
 
 ---
 
-# Important: File Path
+# Important: File Transfer
 
-현재 로컬에서는 `filePath`를 이용하여 PDF를 직접 읽고 있습니다.
+FastAPI는 Spring의 파일 경로에 접근하지 않습니다. 두 서버가 서로 다른 머신이나
+Render 서비스여도 PDF 파일을 HTTP로 전달하므로 공유 디스크 없이 처리할 수 있습니다.
+재시도를 위해 Spring은 원본 PDF를 보관해야 합니다. Spring의 저장 파일이 재배포 시
+사라지는 환경에서는 영속 디스크 또는 별도 파일 저장소가 필요합니다.
 
-하지만 Spring Boot와 FastAPI를 각각 Docker Container로 실행할 경우:
+수신 검증 테스트(DB/Gemini/임베딩 모델 다운로드 불필요):
 
-```text
-Spring Boot Container
-        │
-        │ /uploads/test.pdf
-        ▼
-FastAPI Container
+```bash
+python test_document_upload.py
 ```
-
-FastAPI가 Spring의 파일 경로를 바로 읽을 수 없습니다.
-
-따라서 배포 단계에서는 다음 방식 중 하나를 사용할 예정입니다.
-
-```text
-1. Docker Shared Volume
-
-또는
-
-2. AWS S3 등의 Object Storage
-```
-
-현재 개발 단계에서는 로컬 파일 경로를 사용합니다.
 
 ---
 

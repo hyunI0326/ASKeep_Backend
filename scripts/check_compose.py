@@ -1,4 +1,4 @@
-"""한 서버 구성의 내부 주소, 준비 순서, 공유 PDF 경로를 검증한다."""
+"""한 서버 구성의 내부 주소, 준비 순서, Spring PDF 저장소를 검증한다."""
 import json
 import os
 from pathlib import Path
@@ -19,11 +19,10 @@ assert backend["environment"]["DB_URL"] == "jdbc:postgresql://postgres:5432/aske
 assert ai["environment"]["DB_HOST"] == "postgres"
 assert ai["environment"]["DB_NAME"] == postgres["environment"]["POSTGRES_DB"] == "askeep"
 assert backend["environment"]["DB_PASSWORD"] == ai["environment"]["DB_PASSWORD"] == postgres["environment"]["POSTGRES_PASSWORD"]
-assert backend["environment"]["UPLOAD_DIR"] == ai["environment"]["UPLOAD_DIR"] == "/uploads"
+assert backend["environment"]["UPLOAD_DIR"] == "/uploads"
 backend_upload = next(v for v in backend["volumes"] if v["target"] == "/uploads")
-ai_upload = next(v for v in ai["volumes"] if v["target"] == "/uploads")
-assert backend_upload["source"] == ai_upload["source"] == "uploads"
-assert not backend_upload.get("read_only", False) and ai_upload["read_only"]
+assert backend_upload["source"] == "uploads" and not backend_upload.get("read_only", False)
+assert all(v["target"] != "/uploads" for v in ai["volumes"])
 assert not ai.get("ports")
 assert all(p["host_ip"] == "127.0.0.1" for p in postgres["ports"])
 assert backend["ports"][0]["target"] == 8080

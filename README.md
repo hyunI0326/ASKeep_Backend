@@ -23,7 +23,7 @@ docker compose logs -f backend ai
 - 프론트 API 주소: `http://서버주소:8080/api/v1`, 웹소켓: `ws://서버주소:8080/ws`
 - Spring → FastAPI: `http://ai:8000`, 두 서비스 → DB: `postgres:5432/askeep`
 - FastAPI의 8000 포트는 호스트에 공개하지 않습니다. DB의 5432 포트는 호스트의 `127.0.0.1`에서만 접근 가능합니다.
-- PDF는 `uploads` 볼륨을 두 서비스의 `/uploads`에 연결해 공유합니다. FastAPI는 읽기 전용입니다.
+- Spring은 PDF를 `uploads` 볼륨의 `/uploads`에 저장하고 FastAPI로 파일 자체를 multipart 전송합니다. FastAPI와 업로드 폴더를 공유할 필요가 없습니다.
 - DB 준비 후 FastAPI를 시작하고, FastAPI의 `/health` 응답 후 Spring을 시작합니다.
 - 첫 실행은 임베딩 모델 다운로드 때문에 시간이 걸립니다. 모델 캐시는 `model_cache` 볼륨에 유지됩니다.
 
@@ -39,6 +39,18 @@ AI 답변 확인 → 세션 종료 → 요약 조회 순서로 실제 연동을 
 기존 로컬 개발에서 저장한 자료의 절대경로는 새 컨테이너 경로와 다르므로, 검증용 PDF는 새로 업로드하세요.
 
 설정 검증(실제 키나 Docker 데몬 불필요): `python3 scripts/check_compose.py`
+
+## Render에서 Spring과 FastAPI를 별도로 실행
+
+FastAPI 서비스는 Root Directory `ai-server`, Dockerfile Path `./Dockerfile`로 배포합니다.
+Spring의 `AI_SERVER_BASE_URL`에는 실제 FastAPI 서비스 주소를 설정하고,
+FastAPI의 `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`는 Spring과 같은 DB를 가리키게 설정합니다.
+`GEMINI_API_KEY`는 FastAPI 서비스에 설정합니다. AI API에는 별도 인증이 없으므로 같은 Render 워크스페이스와 지역의 Private Service로 연결합니다.
+
+자료 처리는 `POST /documents/process`에 multipart 필드 `materialId`, `sessionId`, `file`을 보냅니다.
+JSON `filePath` 요청은 더 이상 받지 않습니다. Spring과 FastAPI를 모두 새 코드로 빌드·배포해야 합니다.
+FastAPI는 받은 PDF를 처리 후 폐기하고 청크·임베딩만 DB에 저장합니다.
+Spring에는 재시도용 원본 PDF가 필요하므로, 재시작 후에도 재시도하려면 Spring의 업로드 폴더에 영속 저장소가 필요합니다.
 
 ## 추가·변경된 API
 
