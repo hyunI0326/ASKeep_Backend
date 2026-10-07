@@ -1,3 +1,45 @@
+## 한 서버에서 실행
+
+Docker Compose로 Spring Boot, FastAPI, PostgreSQL을 한 서버에서 실행합니다.
+프로젝트 루트의 `.env`를 사용하며, 기존 `ai-server/.env`는 컨테이너에 복사하지 않습니다.
+
+```bash
+# 기존 .env가 있으면 그대로 사용합니다.
+test -f .env || cp .env.example .env
+```
+
+`.env`에 `GEMINI_API_KEY`와 `JWT_SECRET`을 입력하세요. `JWT_SECRET`은
+`openssl rand -hex 32`로 생성할 수 있습니다. `DB_PASSWORD`는 세 서비스에
+동일하게 적용됩니다. 기존 DB 볼륨이 있으면 생성 당시 비밀번호를 유지해야 합니다.
+배포 시 `CORS_ALLOWED_ORIGINS`에 실제 프론트 주소를 지정하세요.
+
+```bash
+docker compose config --quiet
+docker compose up -d --build
+docker compose ps
+docker compose logs -f backend ai
+```
+
+- 프론트 API 주소: `http://서버주소:8080/api/v1`, 웹소켓: `ws://서버주소:8080/ws`
+- Spring → FastAPI: `http://ai:8000`, 두 서비스 → DB: `postgres:5432/askeep`
+- FastAPI의 8000 포트는 호스트에 공개하지 않습니다. DB의 5432 포트는 호스트의 `127.0.0.1`에서만 접근 가능합니다.
+- PDF는 `uploads` 볼륨을 두 서비스의 `/uploads`에 연결해 공유합니다. FastAPI는 읽기 전용입니다.
+- DB 준비 후 FastAPI를 시작하고, FastAPI의 `/health` 응답 후 Spring을 시작합니다.
+- 첫 실행은 임베딩 모델 다운로드 때문에 시간이 걸립니다. 모델 캐시는 `model_cache` 볼륨에 유지됩니다.
+
+기존 DB에 `material_chunks`가 없다면 데이터를 삭제하지 않고 초기화 SQL을 적용하세요.
+
+```bash
+docker compose exec -T postgres psql -U postgres -d askeep -v ON_ERROR_STOP=1 < db/init.sql
+```
+
+로그인 → 세션 생성 → PDF 업로드 및 `COMPLETED` 확인 → 세션 시작 → 질문 등록 →
+AI 답변 확인 → 세션 종료 → 요약 조회 순서로 실제 연동을 확인합니다.
+`/health`만으로 Gemini 호출이나 DB 저장 성공을 확인할 수는 없습니다.
+기존 로컬 개발에서 저장한 자료의 절대경로는 새 컨테이너 경로와 다르므로, 검증용 PDF는 새로 업로드하세요.
+
+설정 검증(실제 키나 Docker 데몬 불필요): `python3 scripts/check_compose.py`
+
 ## 추가·변경된 API
 
 | 기능 | 메서드·경로 | 권한 | 성공 |

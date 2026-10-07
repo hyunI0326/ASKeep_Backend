@@ -3,3 +3,7 @@
 build
 ai-server
 db
+.env
+.env.*
+.codex
+.agents
