@@ -25,7 +25,7 @@ docker compose logs -f backend ai
 - FastAPI의 8000 포트는 호스트에 공개하지 않습니다. DB의 5432 포트는 호스트의 `127.0.0.1`에서만 접근 가능합니다.
 - Spring은 PDF를 `uploads` 볼륨의 `/uploads`에 저장하고 FastAPI로 파일 자체를 multipart 전송합니다. FastAPI와 업로드 폴더를 공유할 필요가 없습니다.
 - DB 준비 후 FastAPI를 시작하고, FastAPI의 `/health` 응답 후 Spring을 시작합니다.
-- 첫 실행은 임베딩 모델 다운로드 때문에 시간이 걸립니다. 모델 캐시는 `model_cache` 볼륨에 유지됩니다.
+- 첫 빌드는 임베딩 모델 다운로드 때문에 시간이 걸립니다. 모델은 AI 이미지에 포함되어 시작 시 다시 다운로드하지 않습니다.
 
 기존 DB에 `material_chunks`가 없다면 데이터를 삭제하지 않고 초기화 SQL을 적용하세요.
 
@@ -51,6 +51,12 @@ FastAPI의 `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`는 Spring�
 JSON `filePath` 요청은 더 이상 받지 않습니다. Spring과 FastAPI를 모두 새 코드로 빌드·배포해야 합니다.
 FastAPI는 받은 PDF를 처리 후 폐기하고 청크·임베딩만 DB에 저장합니다.
 Spring에는 재시도용 원본 PDF가 필요하므로, 재시작 후에도 재시도하려면 Spring의 업로드 폴더에 영속 저장소가 필요합니다.
+
+임베딩은 PyTorch 대신 ONNX Runtime과 SentencePiece로 같은 multilingual-e5-small의 INT8 파일을 실행합니다.
+384차원, mean pooling, 정규화와 `passage:`/`query:` 접두사를 유지합니다.
+512MiB 환경을 위해 임베딩을 한 번에 한 문서씩 순차 처리합니다.
+로컬 메모리 회귀 확인: `GEMINI_API_KEY=memory-check-not-a-real-key ai-server/.venv/bin/python ai-server/check_embedding_memory.py`
+이 검사는 시작 및 샘플 임베딩의 최대 RSS가 512MiB 미만인지 확인하며, Render Linux에서의 실측은 별도로 확인해야 합니다.
 
 ## 추가·변경된 API
 

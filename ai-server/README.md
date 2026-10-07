@@ -58,7 +58,7 @@ AI Answer
 - PostgreSQL
 - Psycopg 3
 - pgvector
-- Sentence Transformers
+- ONNX Runtime + SentencePiece (INT8 multilingual-e5-small, 384차원)
 - Uvicorn
 
 향후 추가 예정:
@@ -211,7 +211,10 @@ uvicorn
 pymupdf
 psycopg[binary]
 pgvector
-sentence-transformers
+onnxruntime==1.30.0
+sentencepiece
+huggingface-hub
+numpy
 python-dotenv
 ```
 
@@ -224,7 +227,7 @@ uv sync
 또는 필요한 라이브러리를 직접 설치할 수 있습니다.
 
 ```bash
-uv add fastapi uvicorn pymupdf "psycopg[binary]" pgvector sentence-transformers python-dotenv
+uv add fastapi python-multipart uvicorn pymupdf "psycopg[binary]" pgvector onnxruntime sentencepiece huggingface-hub numpy python-dotenv google-genai
 ```
 
 ---

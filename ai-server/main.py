@@ -1,16 +1,41 @@
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from pydantic import BaseModel
-import fitz
-import psycopg
-from sentence_transformers import SentenceTransformer
-from pgvector.psycopg import register_vector
-from pgvector import Vector
+import numpy as np
+import onnxruntime as ort
+import sentencepiece as spm
+from huggingface_hub import snapshot_download
 import os
 from dotenv import load_dotenv
+from pathlib import Path
+from threading import Lock
+
+# Load ONNX before the HTTP/PDF clients to avoid overlapping startup allocations.
+load_dotenv()
+model_dir = Path(snapshot_download(
+    "intfloat/multilingual-e5-small",
+    revision="614241f622f53c4eeff9890bdc4f31cfecc418b3",
+    allow_patterns=["onnx/model_qint8_avx512_vnni.onnx", "sentencepiece.bpe.model"],
+    cache_dir=os.getenv("HF_HOME"), local_files_only=os.getenv("HF_HUB_OFFLINE") == "1",
+))
+session_options = ort.SessionOptions()
+session_options.intra_op_num_threads = 1
+session_options.inter_op_num_threads = 1
+session_options.enable_cpu_mem_arena = False
+model = ort.InferenceSession(str(model_dir / "onnx/model_qint8_avx512_vnni.onnx"),
+                             sess_options=session_options, providers=["CPUExecutionProvider"])
+tokenizer = spm.SentencePieceProcessor(model_file=str(model_dir / "sentencepiece.bpe.model"))
+# ponytail: serialize CPU embedding to cap memory; use a larger AI instance for concurrent inference.
+embedding_lock = Lock()
+
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from pydantic import BaseModel
+import pymupdf as fitz
+import psycopg
+from pgvector.psycopg import register_vector
+from pgvector import Vector
 from google import genai
 from google.genai.errors import ServerError
 import time
 import json
+import re
 from typing import List, Optional
 
 
@@ -94,28 +119,34 @@ def save_chunks(chunks, material_id: int):
                 )
         conn.commit()
 
+# XLM-R의 SentencePiece ID를 E5 vocabulary에 맞추고 512토큰으로 제한한다.
+def tokenize_text(text: str):
+    special = {"<s>": 0, "<pad>": 1, "</s>": 2, "<unk>": 3, "<mask>": tokenizer.vocab_size() + 1}
+    ids = []
+    for part in re.split(r"(<s>|</s>|<pad>|<unk>|<mask>)", text):
+        if part in special:
+            ids.append(special[part])
+        else:
+            ids.extend(piece + 1 if piece else 3 for piece in tokenizer.encode(part))
+    return np.array([[0, *ids[:510], 2]], dtype=np.int64)
+
+
+def embed_text(text: str):
+    with embedding_lock:
+        ids = tokenize_text(text)
+        hidden = model.run(None, {"input_ids": ids, "attention_mask": np.ones_like(ids),
+                                  "token_type_ids": np.zeros_like(ids)})[0]
+        embedding = hidden[0].mean(axis=0)
+        return Vector((embedding / max(float(np.linalg.norm(embedding)), 1e-12)).tolist())
+
+
 #embedding 함수
 def create_document_embedding(texts:list[str]):
-    passages = [
-        f"passage: {text}"
-        for text in texts
-    ]
-    embeddings = model.encode(
-        passages,
-        normalize_embeddings=True
-    )
-    return [
-        Vector(embedding.tolist())
-        for embedding in embeddings
-    ]
+    return [embed_text(f"passage: {text}") for text in texts]
 
 #질문용 embedding 함수
 def create_query_embedding(query:str):
-    embedding = model.encode(
-        f"query: {query}",
-        normalize_embeddings=True
-    )
-    return Vector(embedding.tolist())
+    return embed_text(f"query: {query}")
 
 #vector search 함수
 def search_similar_chunks(
@@ -230,8 +261,6 @@ def rag_answer(session_id:int, question:str):
 
 
 app = FastAPI()
-model = SentenceTransformer("intfloat/multilingual-e5-small")
-load_dotenv()
 gemini_client=genai.Client(
     api_key=os.getenv("GEMINI_API_KEY")
 )

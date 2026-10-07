@@ -1,17 +1,16 @@
 """실제 multipart/PDF 처리를 검증한다. DB 저장과 외부 AI만 대체한다."""
 import importlib.util
 from pathlib import Path
-import sys
-from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
-import fitz
+import pymupdf as fitz
 from fastapi.testclient import TestClient
 
 spec = importlib.util.spec_from_file_location("ai_upload_test", Path(__file__).with_name("main.py"))
 module = importlib.util.module_from_spec(spec)
-with patch.dict(sys.modules, {"sentence_transformers": SimpleNamespace(SentenceTransformer=lambda _: None)}), \
+with patch("huggingface_hub.snapshot_download", return_value="/unused-model"), \
+     patch("onnxruntime.InferenceSession"), patch("sentencepiece.SentencePieceProcessor"), \
      patch("google.genai.Client"), patch("dotenv.load_dotenv"):
     spec.loader.exec_module(module)
 

@@ -22,7 +22,7 @@ assert backend["environment"]["DB_PASSWORD"] == ai["environment"]["DB_PASSWORD"]
 assert backend["environment"]["UPLOAD_DIR"] == "/uploads"
 backend_upload = next(v for v in backend["volumes"] if v["target"] == "/uploads")
 assert backend_upload["source"] == "uploads" and not backend_upload.get("read_only", False)
-assert all(v["target"] != "/uploads" for v in ai["volumes"])
+assert not ai.get("volumes")
 assert not ai.get("ports")
 assert all(p["host_ip"] == "127.0.0.1" for p in postgres["ports"])
 assert backend["ports"][0]["target"] == 8080
