@@ -1,6 +1,8 @@
-"""실제 multipart/PDF 처리를 검증한다. DB 저장과 외부 AI만 대체한다."""
+"""PDF 처리와 JSON 응답 계약을 검증한다. DB 저장과 외부 AI만 대체한다."""
 import importlib.util
+import json
 from pathlib import Path
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -58,6 +60,29 @@ class DocumentUploadTest(unittest.TestCase):
             save.side_effect = RuntimeError("storage unavailable")
             self.assertEqual(client.post("/documents/process", data={"materialId": "7", "sessionId": "3"},
                                          files={"file": ("lecture.pdf", pdf)}).status_code, 500)
+
+
+class MarkdownResponseTest(unittest.TestCase):
+    def test_markdown_text_stays_inside_json_fields(self):
+        markdown = '## 핵심 내용\n\n- **중요**: "답변"\n\n```python\nprint("hello")\n```'
+        generate = module.gemini_client.models.generate_content
+        with TestClient(module.app) as client, patch.object(module, "search_similar_chunks", return_value=[
+            (1, 7, 0, 2, "자료 내용", 0.9)
+        ]):
+            generate.return_value = SimpleNamespace(text=markdown)
+            response = client.post("/ai/answer", json={"sessionId": 3, "question": "핵심 내용은?"})
+            self.assertEqual(response.status_code, 200)
+            self.assertIn("application/json", response.headers["content-type"])
+            body = response.json()
+            self.assertEqual(set(body), {"sessionId", "question", "answer", "sources"})
+            self.assertEqual(body["answer"], markdown)
+            self.assertEqual(body["sources"][0]["materialId"], 7)
+
+            generate.return_value = SimpleNamespace(text=json.dumps({"summary": markdown, "tags": ["AI", "PDF"]}))
+            response = client.post("/sessions/summary", json={"sessionId": 3, "title": "테스트 세션"})
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json(), {"sessionId": 3, "summary": markdown, "tags": ["AI", "PDF"]})
+            self.assertEqual(generate.call_args.kwargs["config"]["response_mime_type"], "application/json")
 
 
 if __name__ == "__main__":

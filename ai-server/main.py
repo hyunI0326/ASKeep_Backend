@@ -212,6 +212,8 @@ def generate_answer(question:str, context:str):
 1. 제공된 자료에 있는 내용을 우선 사용한다.
 2. 사용자가 이해하기 쉽게 설명한다.
 3. 필요하지 않은 내용을 과도하게 추가하지 않는다.
+4. 답변 본문은 Markdown 형식으로 작성하고, 내용에 맞게 제목, 목록, 굵은 강조를 사용한다.
+5. 답변 본문만 출력하며, 본문 전체를 Markdown 코드 블록으로 감싸지 않는다.
 
 [자료]
 {context}
@@ -403,6 +405,8 @@ def generate_summary(request: SummaryRequest):
 3. tags: 세션 주제를 나타내는 키워드 3~7개 (각 20자 이내, '#' 없이).
 4. 주어진 내용에 없는 사실을 지어내지 않는다.
 5. 반드시 {{"summary": "...", "tags": ["...", "..."]}} 형식의 JSON만 출력한다.
+6. summary 문자열의 본문은 Markdown 형식으로 작성하고, 내용에 맞게 제목, 목록, 굵은 강조를 사용한다.
+7. JSON 전체를 코드 블록으로 감싸지 않고, summary의 줄바꿈은 JSON 규칙에 맞게 이스케이프한다. tags는 일반 문자열로 유지한다.
 
 [세션 정보]
 제목: {request.title}
