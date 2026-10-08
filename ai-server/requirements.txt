@@ -1,0 +1,12 @@
+fastapi
+python-multipart
+uvicorn
+pymupdf
+psycopg[binary]
+pgvector
+onnxruntime==1.30.0
+sentencepiece
+huggingface-hub
+numpy
+python-dotenv
+google-genai

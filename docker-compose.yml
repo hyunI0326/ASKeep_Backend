@@ -1,0 +1,71 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg17
+    container_name: askeep-postgres
+    restart: unless-stopped
+
+    environment:
+      POSTGRES_DB: askeep
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-password}
+
+    ports:
+      - "127.0.0.1:5432:5432"
+
+    volumes:
+      # PostgreSQL 데이터 유지
+      - postgres_data:/var/lib/postgresql/data
+
+      # 최초 DB 생성 시 pgvector / material_chunks 초기화
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d askeep"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  ai:
+    build: ./ai-server
+    restart: unless-stopped
+    environment:
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_NAME: askeep
+      DB_USER: postgres
+      DB_PASSWORD: ${DB_PASSWORD:-password}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:?Set GEMINI_API_KEY in .env}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      start_period: 120s
+      retries: 30
+
+  backend:
+    build: .
+    restart: unless-stopped
+    environment:
+      AI_SERVER_BASE_URL: http://ai:8000
+      DB_URL: jdbc:postgresql://postgres:5432/askeep
+      DB_USER: postgres
+      DB_PASSWORD: ${DB_PASSWORD:-password}
+      UPLOAD_DIR: /uploads
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env (at least 32 bytes)}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:5173,https://askeep.vercel.app}
+    ports:
+      - "8080:8080"
+    volumes:
+      - uploads:/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ai:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  uploads:
