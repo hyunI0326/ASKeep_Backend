@@ -4,6 +4,8 @@ import com.GDGoCSMU.ASKeep.domain.session.dto.MySessionResponse;
 import com.GDGoCSMU.ASKeep.domain.session.dto.SessionCreateRequest;
 import com.GDGoCSMU.ASKeep.domain.session.dto.SessionResponse;
 import com.GDGoCSMU.ASKeep.domain.session.repository.SessionSummaryRepository;
+import com.GDGoCSMU.ASKeep.domain.session.entity.SessionSummary;
+import com.GDGoCSMU.ASKeep.domain.question.QuestionRepository;
 import com.GDGoCSMU.ASKeep.domain.user.domain.UserRole;
 import com.GDGoCSMU.ASKeep.domain.session.dto.SessionUpdateRequest;
 import com.GDGoCSMU.ASKeep.domain.session.SessionParticipant;
@@ -28,6 +30,9 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
+import java.time.LocalDateTime;
 
 @Service
 @Transactional(readOnly = true)
@@ -43,12 +48,14 @@ public class SessionService {
     private final ApplicationEventPublisher eventPublisher;
     private final SessionSummaryService summaryService;
     private final SessionSummaryRepository summaryRepository;
+    private final QuestionRepository questionRepository;
 
     public SessionService(SessionRepository sessionRepository, UserService userService,
                           EntryCodeGenerator entryCodeGenerator,
                           SessionParticipantRepository participantRepository, MaterialService materialService,
                           ApplicationEventPublisher eventPublisher,
-                          SessionSummaryService summaryService, SessionSummaryRepository summaryRepository) {
+                          SessionSummaryService summaryService, SessionSummaryRepository summaryRepository,
+                          QuestionRepository questionRepository) {
         this.sessionRepository = sessionRepository;
         this.userService = userService;
         this.entryCodeGenerator = entryCodeGenerator;
@@ -57,6 +64,7 @@ public class SessionService {
         this.eventPublisher = eventPublisher;
         this.summaryService = summaryService;
         this.summaryRepository = summaryRepository;
+        this.questionRepository = questionRepository;
     }
 
     @Transactional
@@ -66,19 +74,22 @@ public class SessionService {
         return SessionResponse.from(sessionRepository.save(session));
     }
 
-    /** 입장 코드는 그 세션을 연 발표자에게만 보인다 (참여자 포함 나머지는 null) — 팀 결정 */
+    /** 발표자와 참여자에게 입장 코드를 제공하고, 미참여자에게는 숨긴다. */
     public List<SessionResponse> getList(Long userId, SessionStatus status) {
         List<Session> sessions = (status == null)
                 ? sessionRepository.findAllByOrderByCreatedAtDesc()
                 : sessionRepository.findAllByStatusOrderByCreatedAtDesc(status);
+        Set<Long> joinedIds = participantRepository.findByUser_Id(userId).stream()
+                .map(p -> p.getSession().getId()).collect(Collectors.toSet());
         return sessions.stream()
-                .map(s -> SessionResponse.from(s, s.isPresenter(userId)))
+                .map(s -> SessionResponse.from(s, s.isPresenter(userId) || joinedIds.contains(s.getId())))
                 .toList();
     }
 
     public SessionResponse getDetail(Long userId, Long sessionId) {
         Session session = findSession(sessionId);
-        return SessionResponse.from(session, session.isPresenter(userId));
+        return SessionResponse.from(session, session.isPresenter(userId)
+                || participantRepository.existsBySession_IdAndUser_Id(sessionId, userId));
     }
 
     @Transactional
@@ -103,23 +114,36 @@ public class SessionService {
      * 내 세션 기록: 내가 만든 세션(PRESENTER) + 참여한 세션(AUDIENCE), 최신순.
      * role을 주면 그 역할만. 각 세션의 요약 상태(summaryStatus, 없으면 null)를 함께 준다.
      */
-    public List<MySessionResponse> getMySessions(Long userId, UserRole role) {
+    public List<MySessionResponse> getMySessions(Long userId, UserRole role, String tag) {
+        if (tag != null && (tag.isBlank() || tag.length() > 30)) throw new IllegalArgumentException("tag는 1~30자여야 합니다.");
+        Map<Long, LocalDateTime> joinedAt = new HashMap<>();
+        participantRepository.findByUser_Id(userId).forEach(p -> joinedAt.put(p.getSession().getId(), p.getJoinedAt()));
         List<MySessionResponse> result = new ArrayList<>();
         if (role == null || role == UserRole.PRESENTER) {
             sessionRepository.findAllByPresenter_IdOrderByCreatedAtDesc(userId)
-                    .forEach(s -> result.add(new MySessionResponse(UserRole.PRESENTER.name(), SessionResponse.from(s), null)));
+                    .forEach(s -> result.add(new MySessionResponse(UserRole.PRESENTER.name(), SessionResponse.from(s), null,
+                            List.of(), 0, s.getCreatedAt())));
         }
         if (role == null || role == UserRole.AUDIENCE) {
             sessionRepository.findJoinedByUserId(userId)
-                    .forEach(s -> result.add(new MySessionResponse(UserRole.AUDIENCE.name(), SessionResponse.from(s, false), null)));
+                    .forEach(s -> result.add(new MySessionResponse(UserRole.AUDIENCE.name(), SessionResponse.from(s), null,
+                            List.of(), 0, joinedAt.get(s.getId()))));
         }
         if (result.isEmpty()) return result;
 
-        Map<Long, String> summaryStatus = new HashMap<>();
+        Map<Long, SessionSummary> summaries = new HashMap<>();
         summaryRepository.findBySession_IdIn(result.stream().map(r -> r.session().sessionId()).toList())
-                .forEach(s -> summaryStatus.put(s.getSession().getId(), s.getStatus().name()));
+                .forEach(s -> summaries.put(s.getSession().getId(), s));
         return result.stream()
-                .map(r -> new MySessionResponse(r.myRole(), r.session(), summaryStatus.get(r.session().sessionId())))
+                .filter(r -> tag == null || (summaries.containsKey(r.session().sessionId())
+                        && summaries.get(r.session().sessionId()).getTags().stream().anyMatch(t -> t.equalsIgnoreCase(tag.trim()))))
+                .map(r -> {
+                    SessionSummary summary = summaries.get(r.session().sessionId());
+                    // shortcut: one count per session, batch aggregate if history lists become large.
+                    return new MySessionResponse(r.myRole(), r.session(), summary == null ? null : summary.getStatus().name(),
+                            summary == null ? List.of() : List.copyOf(summary.getTags()),
+                            questionRepository.countBySession_Id(r.session().sessionId()), r.joinedAt());
+                })
                 .sorted(Comparator.comparing((MySessionResponse r) -> r.session().createdAt(),
                         Comparator.nullsLast(Comparator.reverseOrder())))
                 .toList();

@@ -5,6 +5,12 @@ import java.util.function.Predicate;
 import com.jayway.jsonpath.JsonPath;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import com.GDGoCSMU.ASKeep.domain.material.client.AiClientServer;
+import com.GDGoCSMU.ASKeep.domain.question.dto.AiAnswerResponse;
+import java.util.concurrent.CountDownLatch;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.when;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.messaging.simp.stomp.StompFrameHandler;
@@ -41,6 +47,8 @@ import static org.junit.jupiter.api.Assertions.*;
         "spring.jpa.hibernate.ddl-auto=create-drop"
 })
 class QuestionRealtimeTest {
+    @MockitoBean
+    AiClientServer aiClient;
 
     @Value("${local.server.port}")
     int port;
@@ -170,6 +178,119 @@ class QuestionRealtimeTest {
 
         assertNull(byOther.get("author"), "다른 참여자에게는 익명 질문 작성자가 가려져야 합니다");
         assertEquals(false, byOther.get("mine"));
+    }
+
+    @Test
+    void 좋아요는_중복되지_않고_인기순_정렬과_실시간_수에_반영된다() throws Exception {
+        LiveSession live = startLiveSession();
+        String stranger = signupAndLogin();
+        BlockingQueue<String> received = subscribe(live.audience(), live.sessionId());
+        int older = JsonPath.read(post("/api/v1/sessions/" + live.sessionId() + "/questions", live.audience(),
+                "{\"content\":\"익명 공감 질문\",\"anonymous\":true}"), "$.data.id");
+        int newer = postQuestion(live, "새 질문");
+        String path = "/api/v1/questions/" + older;
+        for (int i = 0; i < 2; i++) {
+            String liked = send(HttpRequest.newBuilder(uri(path + "/like"))
+                    .header("Authorization", "Bearer " + live.audience()).PUT(HttpRequest.BodyPublishers.noBody()));
+            assertEquals(1, (int) JsonPath.read(liked, "$.data.likeCount"));
+            assertEquals(true, JsonPath.read(liked, "$.data.likedByMe"));
+            assertEquals(true, JsonPath.read(liked, "$.data.mine"));
+        }
+        Map<String, Object> data = JsonPath.read(waitUntil(received,
+                m -> "QUESTION_UPDATED".equals(JsonPath.read(m, "$.type"))
+                        && Integer.valueOf(older).equals(JsonPath.read(m, "$.data.id"))
+                        && Integer.valueOf(1).equals(JsonPath.read(m, "$.data.likeCount")), "좋아요 알림"), "$.data");
+        assertNull(data.get("author"));
+        assertFalse(data.containsKey("mine"));
+        assertFalse(data.containsKey("likedByMe"));
+        assertEquals(false, JsonPath.read(get(path, live.presenter()), "$.data.likedByMe"));
+        assertEquals(older, (int) JsonPath.read(get("/api/v1/sessions/" + live.sessionId() + "/questions?sort=popular", live.audience()), "$.data.items[0].id"));
+        assertEquals(newer, (int) JsonPath.read(get("/api/v1/sessions/" + live.sessionId() + "/questions", live.audience()), "$.data.items[0].id"));
+        assertEquals(403, http.send(HttpRequest.newBuilder(uri(path + "/like"))
+                .header("Authorization", "Bearer " + stranger).PUT(HttpRequest.BodyPublishers.noBody()).build(), HttpResponse.BodyHandlers.ofString()).statusCode());
+        for (int i = 0; i < 2; i++) {
+            String unliked = delete(path + "/like", live.audience());
+            assertEquals(0, (int) JsonPath.read(unliked, "$.data.likeCount"));
+            assertEquals(false, JsonPath.read(unliked, "$.data.likedByMe"));
+        }
+        waitUntil(received, m -> "QUESTION_UPDATED".equals(JsonPath.read(m, "$.type"))
+                && Integer.valueOf(older).equals(JsonPath.read(m, "$.data.id"))
+                && Integer.valueOf(0).equals(JsonPath.read(m, "$.data.likeCount")), "좋아요 취소 알림");
+        assertEquals(newer, (int) JsonPath.read(get("/api/v1/sessions/" + live.sessionId() + "/questions?sort=popular", live.audience()), "$.data.items[0].id"));
+        assertEquals(400, http.send(HttpRequest.newBuilder(uri("/api/v1/sessions/" + live.sessionId() + "/questions?sort=popular&afterId=0"))
+                .header("Authorization", "Bearer " + live.audience()).GET().build(), HttpResponse.BodyHandlers.ofString()).statusCode());
+        assertEquals(200, http.send(HttpRequest.newBuilder(uri(path + "/answered"))
+                .header("Origin", "https://askeep.vercel.app").header("Access-Control-Request-Method", "PUT")
+                .header("Access-Control-Request-Headers", "authorization").method("OPTIONS", HttpRequest.BodyPublishers.noBody())
+                .build(), HttpResponse.BodyHandlers.ofString()).statusCode());
+    }
+
+    @Test
+    void 완료표시는_발표자가_설정취소하고_직접요청은_작성자가_한다() throws Exception {
+        LiveSession live = startLiveSession();
+        int id = postQuestion(live, "직접 답변을 듣고 싶은 질문");
+        String path = "/api/v1/questions/" + id;
+        BlockingQueue<String> received = subscribe(live.audience(), live.sessionId());
+        assertEquals(403, http.send(HttpRequest.newBuilder(uri(path + "/answered"))
+                .header("Authorization", "Bearer " + live.audience()).PUT(HttpRequest.BodyPublishers.noBody())
+                .build(), HttpResponse.BodyHandlers.ofString()).statusCode());
+        String completed = send(HttpRequest.newBuilder(uri(path + "/answered"))
+                .header("Authorization", "Bearer " + live.presenter()).PUT(HttpRequest.BodyPublishers.noBody()));
+        String answeredAt = JsonPath.read(completed, "$.data.answeredAt");
+        assertNotNull(answeredAt);
+        assertEquals(true, JsonPath.read(completed, "$.data.answered"));
+        waitUntil(received, m -> "QUESTION_UPDATED".equals(JsonPath.read(m, "$.type"))
+                && Boolean.TRUE.equals(JsonPath.read(m, "$.data.answered")), "답변 완료 알림");
+        assertEquals(answeredAt, JsonPath.read(send(HttpRequest.newBuilder(uri(path + "/answered"))
+                .header("Authorization", "Bearer " + live.presenter()).PUT(HttpRequest.BodyPublishers.noBody())), "$.data.answeredAt"));
+        String cancelled = delete(path + "/answered", live.presenter());
+        assertEquals(false, JsonPath.read(cancelled, "$.data.answered"));
+        assertNull(JsonPath.read(cancelled, "$.data.answeredAt"));
+        assertEquals(403, http.send(HttpRequest.newBuilder(uri(path + "/presenter-request"))
+                .header("Authorization", "Bearer " + live.presenter()).POST(HttpRequest.BodyPublishers.noBody())
+                .build(), HttpResponse.BodyHandlers.ofString()).statusCode());
+        String requested = post(path + "/presenter-request", live.audience(), null);
+        String requestedAt = JsonPath.read(requested, "$.data.presenterRequestedAt");
+        assertNotNull(requestedAt);
+        assertEquals(true, JsonPath.read(requested, "$.data.presenterRequested"));
+        assertEquals(requestedAt, JsonPath.read(post(path + "/presenter-request", live.audience(), null), "$.data.presenterRequestedAt"));
+        waitUntil(received, m -> "QUESTION_UPDATED".equals(JsonPath.read(m, "$.type"))
+                && Boolean.TRUE.equals(JsonPath.read(m, "$.data.presenterRequested")), "직접 요청 알림");
+        post("/api/v1/sessions/" + live.sessionId() + "/end", live.presenter(), null);
+        assertEquals(409, http.send(HttpRequest.newBuilder(uri(path + "/presenter-request"))
+                .header("Authorization", "Bearer " + live.audience()).POST(HttpRequest.BodyPublishers.noBody())
+                .build(), HttpResponse.BodyHandlers.ofString()).statusCode());
+    }
+
+    @Test
+    void AI_답변이_늦게_완료돼도_완료표시와_직접요청과_좋아요는_유지된다() throws Exception {
+        LiveSession live = startLiveSession();
+        CountDownLatch entered = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        when(aiClient.answer(any())).thenAnswer(invocation -> {
+            entered.countDown();
+            assertTrue(release.await(5, TimeUnit.SECONDS));
+            return new AiAnswerResponse(live.sessionId(), "질문", "AI 답변", java.util.List.of());
+        });
+        BlockingQueue<String> received = subscribe(live.audience(), live.sessionId());
+        int id = postQuestion(live, "처리 중에도 상태가 유지되는 질문");
+        String path = "/api/v1/questions/" + id;
+        try {
+            assertTrue(entered.await(5, TimeUnit.SECONDS));
+            send(HttpRequest.newBuilder(uri(path + "/answered")).header("Authorization", "Bearer " + live.presenter())
+                    .PUT(HttpRequest.BodyPublishers.noBody()));
+            post(path + "/presenter-request", live.audience(), null);
+            send(HttpRequest.newBuilder(uri(path + "/like")).header("Authorization", "Bearer " + live.audience())
+                    .PUT(HttpRequest.BodyPublishers.noBody()));
+        } finally {
+            release.countDown();
+        }
+        waitForAiStatus(received, "COMPLETED");
+        String response = get(path, live.audience());
+        assertEquals(true, JsonPath.read(response, "$.data.answered"));
+        assertEquals(true, JsonPath.read(response, "$.data.presenterRequested"));
+        assertEquals(1, (int) JsonPath.read(response, "$.data.likeCount"));
+        assertEquals(true, JsonPath.read(response, "$.data.likedByMe"));
     }
 
     // --- helpers ---

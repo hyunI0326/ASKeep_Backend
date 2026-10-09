@@ -140,6 +140,10 @@ class SessionSummaryAndHistoryTest {
                 .andExpect(jsonPath("$.data[0].session.title").value("앨리스 세션"));
         mvc.perform(get("/api/v1/users/me/sessions?role=AUDIENCE").header("Authorization", "Bearer " + alice))
                 .andExpect(jsonPath("$.data.length()").value(1))
+                .andExpect(jsonPath("$.data[0].joinedAt").isNotEmpty())
+                .andExpect(jsonPath("$.data[0].questionCount").value(0))
+                .andExpect(jsonPath("$.data[0].tags").isEmpty())
+                .andExpect(jsonPath("$.data[0].session.entryCode").isString())
                 .andExpect(jsonPath("$.data[0].session.title").value("밥 세션"));
         mvc.perform(get("/api/v1/users/me/sessions?role=WRONG").header("Authorization", "Bearer " + alice))
                 .andExpect(status().isBadRequest());
@@ -147,10 +151,25 @@ class SessionSummaryAndHistoryTest {
 
         // 종료하면 요약 상태가 함께 나온다
         mvc.perform(post("/api/v1/sessions/" + aliceSession + "/start").header("Authorization", "Bearer " + alice));
+        mvc.perform(post("/api/v1/sessions/" + aliceSession + "/questions").header("Authorization", "Bearer " + alice)
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"content\":\"태그와 질문 수 확인\",\"anonymous\":true}"))
+                .andExpect(status().isAccepted());
         mvc.perform(post("/api/v1/sessions/" + aliceSession + "/end").header("Authorization", "Bearer " + alice));
         waitForSummary("/api/v1/sessions/" + aliceSession, alice, "COMPLETED");
         mvc.perform(get("/api/v1/users/me/sessions?role=PRESENTER").header("Authorization", "Bearer " + alice))
+                .andExpect(jsonPath("$.data[0].questionCount").value(1))
+                .andExpect(jsonPath("$.data[0].tags").value(org.hamcrest.Matchers.contains("JPA", "N+1")))
+                .andExpect(jsonPath("$.data[0].joinedAt").isNotEmpty())
                 .andExpect(jsonPath("$.data[0].summaryStatus").value("COMPLETED"));
+        mvc.perform(get("/api/v1/users/me/sessions").param("tag", "jpa").header("Authorization", "Bearer " + alice))
+                .andExpect(jsonPath("$.data.length()").value(1))
+                .andExpect(jsonPath("$.data[0].session.sessionId").value(aliceSession));
+        mvc.perform(get("/api/v1/users/me/sessions").param("tag", "N+1").header("Authorization", "Bearer " + alice))
+                .andExpect(jsonPath("$.data.length()").value(1));
+        mvc.perform(get("/api/v1/users/me/sessions").param("tag", "없는 태그").header("Authorization", "Bearer " + alice))
+                .andExpect(jsonPath("$.data").isEmpty());
+        mvc.perform(get("/api/v1/users/me/sessions").param("tag", " ").header("Authorization", "Bearer " + alice))
+                .andExpect(status().isBadRequest());
     }
 
     // --- helpers ---

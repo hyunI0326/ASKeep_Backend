@@ -58,6 +58,21 @@ Spring에는 재시도용 원본 PDF가 필요하므로, 재시작 후에도 재
 로컬 메모리 회귀 확인: `GEMINI_API_KEY=memory-check-not-a-real-key ai-server/.venv/bin/python ai-server/check_embedding_memory.py`
 이 검사는 시작 및 샘플 임베딩의 최대 RSS가 512MiB 미만인지 확인하며, Render Linux에서의 실측은 별도로 확인해야 합니다.
 
+## 질문·세션 체크리스트 기능
+
+- 답변 완료: 발표자가 `PUT /api/v1/questions/{id}/answered`로 설정하고 `DELETE`로 취소합니다.
+- 나도 궁금해요: 세션 멤버가 `PUT /api/v1/questions/{id}/like`로 설정하고 `DELETE`로 취소합니다.
+- 질문 목록: `sort=latest`(기본) 또는 `sort=popular`(공감 수 내림차순, 동률은 최신순).
+- 직접 묻기 요청: 진행 중 세션의 질문 작성자가 `POST /api/v1/questions/{id}/presenter-request`로 요청합니다.
+- 질문 REST 응답에 `answered`, `answeredAt`, `presenterRequested`, `presenterRequestedAt`, `likeCount`, `likedByMe`를 추가했습니다. 기존 `mine`은 익명 질문에도 제공합니다.
+- 상태 변경은 기존 `QUESTION_UPDATED` 알림으로 전달합니다. 알림에서 `mine`, `likedByMe`는 빠지므로 프론트는 기존 개인별 값을 유지하거나 다시 조회하세요.
+- 입장 코드는 발표자와 참여한 청자에게 제공하고 미참여자에게는 숨깁니다.
+- `GET /api/v1/users/me/sessions`에 `tags`, `questionCount`, `joinedAt`을 추가했습니다. `?tag=JPA`로 태그를 필터링할 수 있습니다.
+
+Spring 재배포가 필요합니다. 운영 DB 스키마를 수동 관리한다면 **Spring이 사용하는 DB**에 `db/question-engagement.sql`을 먼저 적용하세요.
+현재 기본 `ddl-auto=update`도 새 필드와 공감 테이블을 생성합니다. 기존 청자의 입장 시각은 기록이 없어 `null`일 수 있습니다.
+프론트 UI 연동과 실제 개발 서버 배포는 별도 작업입니다. 요청·응답 예시는 `api_secp.md`에 정리했습니다.
+
 ## 추가·변경된 API
 
 | 기능 | 메서드·경로 | 권한 | 성공 |
@@ -99,7 +114,7 @@ Spring에는 재시도용 원본 PDF가 필요하므로, 재시작 후에도 재
   프론트(참고)
 - 청중은 발표자에게 받은 입장 코드로 `POST /api/v1/sessions/participants`를 호출해 참여한 뒤 웹소켓을 구독해야 합니다.
 - 참여 API 주소가 바뀌었습니다. POST /sessions/{sessionId}/participants는 삭제됐습니다. 이미 이걸로 화면을 만들었다면 404가 날 수도 있습니다......
-+ 입장 코드가 null로 옵니다. 발표자가 아니면 entryCode가 null이라, 목록에서 코드를 보여 주던 화면이 있다면 빈칸이 됩니다.
++ 입장 코드는 발표자와 이미 참여한 청자에게 제공됩니다. 미참여자에게는 null입니다.
 ++ 웹소켓은 토큰이 없으면 연결이 안 됩니다. 연결할 때 Authorization 헤더를 꼭 넣어야 합니다.
 +++질문 등록이 진행 중일 때만 됩니다. 시작 전에 질문하면 409가 나니 입력창을 막아 둬야 합니다.
   아래는 연결 예시를 넣어놓겠습니다

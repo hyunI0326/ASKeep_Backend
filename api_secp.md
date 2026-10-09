@@ -138,7 +138,7 @@
 | 참여 | `POST /sessions/participants` | JSON: `entryCode`(필수) | 201, `ParticipantResponse` |
 | 요약 조회 | `GET /sessions/{sessionId}/summary` | 없음 | 200, `SummaryResponse` |
 | 요약 재시도 | `POST /sessions/{sessionId}/summary/retry` | 없음 | 202, `SummaryResponse` |
-| 내 세션 기록 | `GET /users/me/sessions` | 선택 쿼리 `role`(`PRESENTER`/`AUDIENCE`) | 200, `MySessionResponse[]` |
+| 내 세션 기록 | `GET /users/me/sessions` | 선택 쿼리 `role`(`PRESENTER`/`AUDIENCE`), `tag` | 200, `MySessionResponse[]` |
 
 생성 요청 예시:
 
@@ -170,7 +170,7 @@
 - 조회·목록은 로그인 사용자에게 열려 있습니다. 수정·삭제·시작·종료는 발표자만 할 수 있습니다. 종료된 세션은 수정할 수 없습니다. 처리 중인 자료가 있는 세션은 삭제할 수 없습니다.
 - `entryCode`는 새 세션에 발급되는 6자리 코드입니다(영문 대문자·숫자, 헷갈리는 `0 O 1 I` 제외). 이전 DB에서 생성된 세션은 `entryCode:null`일 수 있으며, 이런 세션에는 참여할 수 없습니다.
 - 참여는 입장 코드로만 합니다. 세션 ID만으로 참여하던 `POST /sessions/{sessionId}/participants`는 삭제되었습니다.
-- `entryCode`는 그 세션을 연 발표자에게만 보이고, 참여자를 포함한 다른 사용자에게는 `null`입니다(목록·상세·내 세션 기록 모두).
+- `entryCode`는 발표자와 이미 참여한 청자에게 제공됩니다(목록·상세·내 세션 기록). 미참여자에게는 `null`입니다.
 
 참여 요청 예시: `{"entryCode":"ABC234"}`. 대소문자와 앞뒤 공백은 무시합니다.
 
@@ -213,12 +213,18 @@
 {
   "myRole": "PRESENTER",
   "session": { "sessionId": 1, "title": "1주차 발표", "status": "ENDED", "...": "SessionResponse와 같음" },
-  "summaryStatus": "COMPLETED"
+  "summaryStatus": "COMPLETED",
+  "tags": ["JPA", "N+1"],
+  "questionCount": 3,
+  "joinedAt": "2026-10-09T10:30:00"
 }
 ```
 
 - 내가 만든 세션(`PRESENTER`)과 입장 코드로 참여한 세션(`AUDIENCE`)을 생성일 내림차순으로 반환합니다. `?role=`로 한쪽만 볼 수 있습니다.
 - `summaryStatus`는 요약 상태이며, 종료 전 세션은 `null`입니다.
+- `tags`는 AI 요약 태그이며 요약이 없으면 `[]`입니다. `questionCount`는 현재 남아 있는 질문 수입니다.
+- `joinedAt`은 청자의 최초 참여 시각이며 재입장해도 유지됩니다. 발표자는 세션 생성 시각을 사용합니다. 기능 추가 전의 청자 참여 기록은 시각을 복원할 수 없어 `null`일 수 있습니다.
+- `?tag=JPA`는 태그 하나를 대소문자 구분 없이 정확히 일치시켜 필터링합니다. `role`과 함께 사용할 수 있고, `tag`는 공백이 아닌 1~30자입니다.
 
 ## 4. 자료
 
@@ -254,12 +260,17 @@
 | 기능 | 메서드·경로 | 요청 | 성공 |
 |---|---|---|---|
 | 등록 | `POST /sessions/{sessionId}/questions` | JSON: `content`(필수), `anonymous`(선택) | 202, `QuestionResponse` |
-| 목록 | `GET /sessions/{sessionId}/questions` | 선택 쿼리 `page`, `size` | 200, 페이지<`QuestionResponse`> |
+| 목록 | `GET /sessions/{sessionId}/questions` | 선택 쿼리 `page`, `size`, `sort=latest\|popular` | 200, 페이지<`QuestionResponse`> |
 | 신규 질문 조회 | `GET /sessions/{sessionId}/questions?afterId={id}` | `afterId`(0 이상) | 200, Polling 응답 |
 | 상세 | `GET /questions/{questionId}` | 없음 | 200, `QuestionResponse` |
 | 수정 | `PATCH /questions/{questionId}` | JSON: `content`, `anonymous` 중 변경할 필드 | 200, `QuestionResponse` |
 | 삭제 | `DELETE /questions/{questionId}` | 없음 | 200, 데이터 없음 |
 | AI 답변 재시도 | `POST /questions/{questionId}/ai-answer/retry` | 없음 | 202, `QuestionResponse` |
+| 답변 완료 설정 | `PUT /questions/{questionId}/answered` | 없음, 발표자만 | 200, `QuestionResponse` |
+| 답변 완료 취소 | `DELETE /questions/{questionId}/answered` | 없음, 발표자만 | 200, `QuestionResponse` |
+| 나도 궁금해요 | `PUT /questions/{questionId}/like` | 없음, 세션 발표자·참여자 | 200, `QuestionResponse` |
+| 공감 취소 | `DELETE /questions/{questionId}/like` | 없음, 본인의 공감만 취소 | 200, `QuestionResponse` |
+| 발표자에게 직접 묻기 요청 | `POST /questions/{questionId}/presenter-request` | 없음, 진행 중 세션의 질문 작성자만 | 200, `QuestionResponse` |
 
 등록 요청 예시: `{"content":"이 부분을 설명해 주세요","anonymous":false}`. `content`는 공백만으로 구성할 수 없습니다. `anonymous` 생략 시 `false`입니다.
 
@@ -274,16 +285,30 @@
   "author": {"id": 2, "username": "밥"},
   "aiStatus": "PENDING",
   "answers": [],
+  "mine": true,
+  "answered": false,
+  "answeredAt": null,
+  "presenterRequested": false,
+  "presenterRequestedAt": null,
+  "likeCount": 0,
+  "likedByMe": false,
   "createdAt": "2026-10-01T10:30:00",
   "updatedAt": "2026-10-01T10:30:00"
 }
 ```
 
-`author.username`에는 사용자의 `name` 값이 들어갑니다. 익명 질문은 `author:null`입니다. `aiStatus` 값은 `PENDING`, `PROCESSING`, `COMPLETED`, `FAILED`입니다.
+`author.username`에는 사용자의 `name` 값이 들어갑니다. REST에서 익명 질문의 작성자는 발표자와 본인에게만 보이고, 다른 참여자에게는 `author:null`입니다. `mine`은 익명 여부와 무관하게 본인 질문이면 `true`입니다. `aiStatus` 값은 `PENDING`, `PROCESSING`, `COMPLETED`, `FAILED`입니다.
+
+- `answered`는 발표자가 수동으로 설정하는 완료 표시이며 AI 처리 상태와 별개입니다. 완료 취소 시 `answeredAt`은 `null`이 됩니다.
+- `presenterRequested`와 `presenterRequestedAt`은 질문 작성자의 직접 묻기 요청 여부·최초 요청 시각입니다. 요청 취소 API는 없습니다.
+- 공감은 사용자당 질문 하나에 한 번만 적용됩니다. 설정·취소를 반복해도 중복되거나 음수가 되지 않습니다.
+- 완료·직접 요청을 반복해도 최초 설정 시각은 유지됩니다.
+- `sort=latest`가 기본이며 ID 내림차순입니다. `sort=popular`는 공감 수 내림차순, 동률이면 ID 내림차순입니다. `afterId`는 `latest`에서만 사용할 수 있습니다.
+- 완료·직접 요청·공감 변경은 기존 `QUESTION_UPDATED` 웹소켓 알림으로 전달됩니다. 알림에는 공통 상태와 `likeCount`가 포함되며, 개인별 `mine`, `likedByMe`는 빠집니다. 프론트에서 기존 개인별 값을 유지하거나 REST로 다시 조회해야 합니다. 익명 알림의 작성자는 항상 숨깁니다.
 
 - 등록·조회는 세션 발표자 또는 참여자만 가능합니다. 등록은 세션이 진행 중(`ONGOING`)일 때만 가능하며, 시작 전·종료 후에는 409 `SESSION_NOT_IN_PROGRESS`입니다. 질문 수정은 작성자만, AI 처리가 시작되기 전(`PENDING`)에만 가능합니다.
 - 삭제는 작성자 또는 발표자가 할 수 있습니다. AI 답변 재시도는 발표자만, `FAILED` 상태에서만 가능합니다.
-- 일반 목록은 ID 내림차순입니다. Polling은 `afterId`보다 큰 ID를 오름차순으로 최대 100개 반환합니다.
+- Polling은 `afterId`보다 큰 ID를 오름차순으로 최대 100개 반환하며 기존 질문의 공감·상태 변경은 반환하지 않습니다. 변경은 웹소켓 또는 재조회로 반영합니다.
 
 Polling 응답 예시:
 

@@ -26,7 +26,8 @@ public class MySessionController {
     /** GET /api/v1/users/me/sessions?role=PRESENTER|AUDIENCE (생략하면 둘 다) */
     @GetMapping
     public ApiResponse<List<MySessionResponse>> mySessions(@AuthenticationPrincipal LoginUser loginUser,
-                                                          @RequestParam(name = "role", required = false) UserRole role) {
-        return ApiResponse.ok(sessionService.getMySessions(loginUser.userId(), role));
+                                                          @RequestParam(name = "role", required = false) UserRole role,
+                                                          @RequestParam(name = "tag", required = false) String tag) {
+        return ApiResponse.ok(sessionService.getMySessions(loginUser.userId(), role, tag));
     }
 }

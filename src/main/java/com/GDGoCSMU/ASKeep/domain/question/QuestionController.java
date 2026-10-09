@@ -7,7 +7,6 @@ import com.GDGoCSMU.ASKeep.global.common.ApiResponse;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.PageRequest;
-import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
 
@@ -31,9 +30,12 @@ public class QuestionController {
 
     @GetMapping("/sessions/{sessionId}/questions")
     ApiResponse<?> list(@PathVariable Long sessionId, @RequestParam(required = false) Long afterId,
-                @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "20") int size) {
+                @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "20") int size,
+                @RequestParam(defaultValue = "latest") String sort) {
         Long viewerId = CurrentUser.id();
+        if (!"latest".equals(sort) && !"popular".equals(sort)) throw new IllegalArgumentException("sort는 latest 또는 popular여야 합니다.");
         if (afterId != null) {
+            if (!"latest".equals(sort)) throw new IllegalArgumentException("afterId는 latest 정렬에서만 사용할 수 있습니다.");
             if (afterId < 0) throw new IllegalArgumentException("afterId는 0 이상이어야 합니다.");
             List<QuestionResponse> items = questionService.after(sessionId, viewerId, afterId).stream()
                     .map(question -> QuestionResponse.forViewer(question, answerRepository, viewerId)).toList();
@@ -41,7 +43,7 @@ public class QuestionController {
             return ApiResponse.ok(Map.of("items", items, "nextAfterId", next));
         }
         validatePage(page, size);
-        var results = questionService.list(sessionId, viewerId, PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "id")));
+        var results = questionService.list(sessionId, viewerId, PageRequest.of(page, size), sort);
         return ApiResponse.ok(PageResponse.from(results, question -> QuestionResponse.forViewer(question, answerRepository, viewerId)));
     }
 
@@ -68,6 +70,36 @@ public class QuestionController {
     ApiResponse<QuestionResponse> retry(@PathVariable Long questionId) {
         Long viewerId = CurrentUser.id();
         return ApiResponse.ok(QuestionResponse.forViewer(questionService.retry(questionId, viewerId), answerRepository, viewerId));
+    }
+
+    @PutMapping("/questions/{questionId}/answered")
+    ApiResponse<QuestionResponse> markAnswered(@PathVariable Long questionId) {
+        Long viewerId = CurrentUser.id();
+        return ApiResponse.ok(QuestionResponse.forViewer(questionService.markAnswered(questionId, viewerId, true), answerRepository, viewerId));
+    }
+
+    @DeleteMapping("/questions/{questionId}/answered")
+    ApiResponse<QuestionResponse> unmarkAnswered(@PathVariable Long questionId) {
+        Long viewerId = CurrentUser.id();
+        return ApiResponse.ok(QuestionResponse.forViewer(questionService.markAnswered(questionId, viewerId, false), answerRepository, viewerId));
+    }
+
+    @PutMapping("/questions/{questionId}/like")
+    ApiResponse<QuestionResponse> like(@PathVariable Long questionId) {
+        Long viewerId = CurrentUser.id();
+        return ApiResponse.ok(QuestionResponse.forViewer(questionService.like(questionId, viewerId, true), answerRepository, viewerId));
+    }
+
+    @DeleteMapping("/questions/{questionId}/like")
+    ApiResponse<QuestionResponse> unlike(@PathVariable Long questionId) {
+        Long viewerId = CurrentUser.id();
+        return ApiResponse.ok(QuestionResponse.forViewer(questionService.like(questionId, viewerId, false), answerRepository, viewerId));
+    }
+
+    @PostMapping("/questions/{questionId}/presenter-request")
+    ApiResponse<QuestionResponse> requestPresenter(@PathVariable Long questionId) {
+        Long viewerId = CurrentUser.id();
+        return ApiResponse.ok(QuestionResponse.forViewer(questionService.requestPresenter(questionId, viewerId), answerRepository, viewerId));
     }
 
     private void validatePage(int page, int size) {

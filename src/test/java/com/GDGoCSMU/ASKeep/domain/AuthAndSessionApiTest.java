@@ -214,15 +214,15 @@ class AuthAndSessionApiTest {
                     .andExpect(jsonPath("$.data.role").value("AUDIENCE"));
         }
 
-        // 참여한 뒤에도 입장 코드는 발표자에게만 보인다 (팀 결정)
+        // 참여한 청자는 상세·목록·내 세션 기록에서 입장 코드를 받는다.
         mvc.perform(get(base).header("Authorization", "Bearer " + audience))
                 .andExpect(jsonPath("$.data.sessionId").value(id))
-                .andExpect(jsonPath("$.data.entryCode").doesNotExist());
+                .andExpect(jsonPath("$.data.entryCode").value(entryCode));
         mvc.perform(get("/api/v1/sessions").header("Authorization", "Bearer " + audience))
-                .andExpect(jsonPath("$.data[?(@.sessionId == " + id + ")].entryCode").value(org.hamcrest.Matchers.contains((Object) null)));
+                .andExpect(jsonPath("$.data[?(@.sessionId == " + id + ")].entryCode").value(org.hamcrest.Matchers.contains(entryCode)));
         mvc.perform(get("/api/v1/users/me/sessions").header("Authorization", "Bearer " + audience))
                 .andExpect(jsonPath("$.data[0].myRole").value("AUDIENCE"))
-                .andExpect(jsonPath("$.data[0].session.entryCode").doesNotExist());
+                .andExpect(jsonPath("$.data[0].session.entryCode").value(entryCode));
 
         // 시작 전(READY)에는 질문 불가
         mvc.perform(post(base + "/questions").header("Authorization", "Bearer " + audience)

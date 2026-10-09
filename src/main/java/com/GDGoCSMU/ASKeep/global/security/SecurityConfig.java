@@ -67,7 +67,7 @@ public class SecurityConfig {
             @Value("${askeep.cors.allowed-origins:http://localhost:3000,http://localhost:5173}") String origins) {
         CorsConfiguration config = new CorsConfiguration();
         config.setAllowedOrigins(List.of(origins.split(",")));
-        config.setAllowedMethods(List.of("GET", "POST", "PATCH", "DELETE", "OPTIONS"));
+        config.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
         config.setAllowedHeaders(List.of("Authorization", "Content-Type"));
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", config);

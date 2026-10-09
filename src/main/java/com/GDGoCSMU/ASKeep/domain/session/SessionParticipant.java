@@ -7,6 +7,8 @@ import jakarta.persistence.*;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
+import org.hibernate.annotations.CreationTimestamp;
+import java.time.LocalDateTime;
 
 @Entity
 @Getter
@@ -28,6 +30,10 @@ public class SessionParticipant {
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     private UserRole role;
+
+    @CreationTimestamp
+    @Column(updatable = false)
+    private LocalDateTime joinedAt;
 
     public SessionParticipant(Session session, User user) {
         this.session = session;
