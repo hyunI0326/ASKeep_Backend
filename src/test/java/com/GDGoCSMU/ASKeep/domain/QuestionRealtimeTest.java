@@ -263,6 +263,40 @@ class QuestionRealtimeTest {
     }
 
     @Test
+    void 작성자는_직접_묻기_요청을_취소할_수_있다() throws Exception {
+        LiveSession live = startLiveSession();
+        int id = postQuestion(live, "요청했다가 취소할 질문");
+        String path = "/api/v1/questions/" + id + "/presenter-request";
+        BlockingQueue<String> received = subscribe(live.presenter(), live.sessionId());
+
+        post(path, live.audience(), null);
+        assertEquals(403, http.send(HttpRequest.newBuilder(uri(path))
+                .header("Authorization", "Bearer " + live.presenter()).DELETE()
+                .build(), HttpResponse.BodyHandlers.ofString()).statusCode(), "작성자가 아니면 취소할 수 없습니다");
+
+        String cancelled = delete(path, live.audience());
+        assertEquals(false, JsonPath.read(cancelled, "$.data.presenterRequested"));
+        assertNull(JsonPath.read(cancelled, "$.data.presenterRequestedAt"));
+        waitUntil(received, m -> "QUESTION_UPDATED".equals(JsonPath.read(m, "$.type"))
+                && Integer.valueOf(id).equals(JsonPath.read(m, "$.data.id"))
+                && Boolean.FALSE.equals(JsonPath.read(m, "$.data.presenterRequested"))
+                && JsonPath.read(m, "$.data.presenterRequestedAt") == null, "직접 요청 취소 알림");
+    }
+
+    @Test
+    void 발표자가_답변을_등록하면_자동으로_답변_완료된다() throws Exception {
+        LiveSession live = startLiveSession();
+        int id = postQuestion(live, "발표자가 글로 답할 질문");
+        String path = "/api/v1/questions/" + id;
+
+        post(path + "/answers", live.presenter(), "{\"content\":\"발표자 답변입니다\"}");
+
+        String question = get(path, live.audience());
+        assertEquals(true, JsonPath.read(question, "$.data.answered"));
+        assertNotNull(JsonPath.read(question, "$.data.answeredAt"));
+    }
+
+    @Test
     void AI_답변이_늦게_완료돼도_완료표시와_직접요청과_좋아요는_유지된다() throws Exception {
         LiveSession live = startLiveSession();
         CountDownLatch entered = new CountDownLatch(1);
