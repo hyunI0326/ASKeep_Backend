@@ -7,6 +7,10 @@ import jakarta.persistence.*;
 import lombok.*;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.HashSet;
+import java.util.Set;
+import java.time.LocalDateTime;
+import org.hibernate.annotations.BatchSize;
 
 @Entity
 @Getter
@@ -36,6 +40,16 @@ public class Question extends BaseEntity {
     @Column(name = "is_anonymous", nullable = false)
     private boolean anonymous;
 
+    private LocalDateTime answeredAt;
+    private LocalDateTime presenterRequestedAt;
+
+    @ManyToMany
+    @JoinTable(name = "question_likes", joinColumns = @JoinColumn(name = "question_id"),
+            inverseJoinColumns = @JoinColumn(name = "user_id"),
+            uniqueConstraints = @UniqueConstraint(columnNames = {"question_id", "user_id"}))
+    @BatchSize(size = 100)
+    private Set<User> likedBy = new HashSet<>();
+
     @OneToMany(mappedBy = "question", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<com.GDGoCSMU.ASKeep.domain.answer.Answer> answers = new ArrayList<>();
 
@@ -50,6 +64,18 @@ public class Question extends BaseEntity {
 
     public void startAiProcessing() {
         this.aiStatus = AiStatus.PROCESSING;
+    }
+
+    public boolean isAnswered() { return answeredAt != null; }
+    public boolean isPresenterRequested() { return presenterRequestedAt != null; }
+
+    public void markAnswered(boolean answered) {
+        if (!answered) answeredAt = null;
+        else if (answeredAt == null) answeredAt = LocalDateTime.now();
+    }
+
+    public void requestPresenter() {
+        if (presenterRequestedAt == null) presenterRequestedAt = LocalDateTime.now();
     }
 
     public void completeAiProcessing() {

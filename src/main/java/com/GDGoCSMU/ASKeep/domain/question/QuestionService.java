@@ -19,6 +19,9 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.security.access.AccessDeniedException;
+import java.time.LocalDateTime;
 
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
@@ -46,9 +49,49 @@ public class QuestionService {
         return question;
     }
 
-    public Page<Question> list(Long sessionId, Long userId, Pageable pageable) {
+    public Page<Question> list(Long sessionId, Long userId, Pageable pageable, String sort) {
         sessionAccess.requireMember(sessionId, userId);
+        if ("popular".equals(sort)) return questionRepository.findPopularBySessionId(sessionId, pageable);
         return questionRepository.findBySession_IdOrderByIdDesc(sessionId, pageable);
+    }
+
+    @Transactional
+    public Question markAnswered(Long id, Long userId, boolean answered) {
+        Question question = findForUpdate(id);
+        sessionAccess.requireHost(question.getSession().getId(), userId);
+        if (question.isAnswered() != answered) {
+            question.markAnswered(answered);
+            questionRepository.saveAndFlush(question);
+            publishUpdated(id, question.getSession().getId());
+        }
+        return question;
+    }
+
+    @Transactional
+    public Question like(Long id, Long userId, boolean liked) {
+        Question question = findForUpdate(id);
+        sessionAccess.requireMember(question.getSession().getId(), userId);
+        boolean changed = liked ? question.getLikedBy().add(userService.getUser(userId))
+                : question.getLikedBy().removeIf(user -> user.getId().equals(userId));
+        if (changed) {
+            question.touch();
+            questionRepository.saveAndFlush(question);
+            publishUpdated(id, question.getSession().getId());
+        }
+        return question;
+    }
+
+    @Transactional
+    public Question requestPresenter(Long id, Long userId) {
+        Question question = findForUpdate(id);
+        sessionAccess.requireLiveMember(question.getSession().getId(), userId);
+        if (!question.getUser().getId().equals(userId)) throw new AccessDeniedException("질문 작성자만 요청할 수 있습니다.");
+        if (!question.isPresenterRequested()) {
+            question.requestPresenter();
+            questionRepository.saveAndFlush(question);
+            publishUpdated(id, question.getSession().getId());
+        }
+        return question;
     }
 
     public List<Question> after(Long sessionId, Long userId, Long afterId) {
@@ -62,8 +105,10 @@ public class QuestionService {
         return question;
     }
 
+    @Transactional
     public Question update(Long id, Long userId, QuestionRequests.Update request) {
-        Question question = get(id, userId);
+        Question question = findForUpdate(id);
+        sessionAccess.requireMember(question.getSession().getId(), userId);
         if (!question.getUser().getId().equals(userId)) throw new org.springframework.security.access.AccessDeniedException("질문 작성자만 수정할 수 있습니다.");
         if (question.getAiStatus() != AiStatus.PENDING) throw new IllegalStateException("AI 처리 전 질문만 수정할 수 있습니다.");
         if (request.content() != null) {
@@ -71,7 +116,7 @@ public class QuestionService {
             question.setContent(request.content());
         }
         if (request.anonymous() != null) question.setAnonymous(request.anonymous());
-        Question saved = questionRepository.save(question);
+        Question saved = questionRepository.saveAndFlush(question);
         publishUpdated(saved.getId(), saved.getSession().getId());
         return saved;
     }
@@ -86,11 +131,14 @@ public class QuestionService {
     }
 
     public Question retry(Long id, Long userId) {
-        Question question = get(id, userId);
-        sessionAccess.requireHost(question.getSession().getId(), userId);
-        question.retryAiProcessing();
-        questionRepository.save(question);
-        publishUpdated(question.getId(), question.getSession().getId());
+        Question question = transactionTemplate.execute(status -> {
+            Question locked = findForUpdate(id);
+            sessionAccess.requireHost(locked.getSession().getId(), userId);
+            locked.retryAiProcessing();
+            questionRepository.saveAndFlush(locked);
+            publishUpdated(locked.getId(), locked.getSession().getId());
+            return locked;
+        });
         processAsync(question.getId(), question.getSession().getId(), question.getContent());
         return question;
     }
@@ -142,24 +190,26 @@ public class QuestionService {
         return questionRepository.findById(id).orElseThrow(() -> new EntityNotFoundException("질문을 찾을 수 없습니다."));
     }
 
+    private Question findForUpdate(Long id) {
+        return questionRepository.findForUpdate(id).orElseThrow(() -> new EntityNotFoundException("질문을 찾을 수 없습니다."));
+    }
+
     private void processAsync(Long questionId, Long sessionId, String content) {
         // ponytail: common pool is sufficient for the initial single-instance service; use a bounded executor if AI volume grows.
         CompletableFuture.runAsync(() -> {
             Question question = questionRepository.findById(questionId).orElse(null);
             if (question == null) return;
-            question.startAiProcessing();
-            questionRepository.save(question);
+            if (questionRepository.updateAiStatus(questionId, AiStatus.PROCESSING, LocalDateTime.now()) == 0) return;
             publishUpdated(questionId, sessionId);
             try {
                 AiAnswerResponse result = aiClientServer.answer(new AiAnswerRequest(sessionId, content));
                 if (result == null || result.answer() == null || result.answer().isBlank()) throw new IllegalStateException("AI 답변이 비어 있습니다.");
                 answerRepository.save(Answer.builder().content(result.answer()).type(AnswerType.AI).question(question).author(null).build());
-                question.completeAiProcessing();
+                questionRepository.updateAiStatus(questionId, AiStatus.COMPLETED, LocalDateTime.now());
             } catch (Exception exception) {
                 log.warn("AI 답변 생성 실패 questionId={}", questionId, exception);
-                question.failAiProcessing();
+                questionRepository.updateAiStatus(questionId, AiStatus.FAILED, LocalDateTime.now());
             }
-            questionRepository.save(question);
             publishUpdated(questionId, sessionId);
         });
     }

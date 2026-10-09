@@ -10,7 +10,10 @@ import java.util.List;
 public record QuestionResponse(Long id, Long sessionId, String content, boolean anonymous,
                                UserSummary author, AiStatus aiStatus, List<AnswerResponse> answers,
                                LocalDateTime createdAt, LocalDateTime updatedAt,
-                               @JsonInclude(JsonInclude.Include.NON_NULL) Boolean mine) {
+                               @JsonInclude(JsonInclude.Include.NON_NULL) Boolean mine,
+                               boolean answered, LocalDateTime answeredAt,
+                               boolean presenterRequested, LocalDateTime presenterRequestedAt,
+                               int likeCount, @JsonInclude(JsonInclude.Include.NON_NULL) Boolean likedByMe) {
 
     /**
      * REST 응답용. 보는 사람에 따라 달라진다.
@@ -21,7 +24,8 @@ public record QuestionResponse(Long id, Long sessionId, String content, boolean 
         boolean mine = question.getUser().getId().equals(viewerId);
         boolean presenter = question.getSession().isPresenter(viewerId);
         boolean showAuthor = !question.isAnonymous() || mine || presenter;
-        return build(question, answerRepository, showAuthor, mine);
+        return build(question, answerRepository, showAuthor, mine,
+                question.getLikedBy().stream().anyMatch(user -> user.getId().equals(viewerId)));
     }
 
     /**
@@ -29,11 +33,11 @@ public record QuestionResponse(Long id, Long sessionId, String content, boolean 
      * 익명 질문의 작성자는 항상 가리고, mine은 넣지 않는다 (JSON에서 빠짐).
      */
     public static QuestionResponse forBroadcast(Question question, AnswerRepository answerRepository) {
-        return build(question, answerRepository, !question.isAnonymous(), null);
+        return build(question, answerRepository, !question.isAnonymous(), null, null);
     }
 
     private static QuestionResponse build(Question question, AnswerRepository answerRepository,
-                                          boolean showAuthor, Boolean mine) {
+                                          boolean showAuthor, Boolean mine, Boolean likedByMe) {
         UserSummary author = showAuthor
                 ? new UserSummary(question.getUser().getId(), question.getUser().getName())
                 : null;
@@ -41,7 +45,9 @@ public record QuestionResponse(Long id, Long sessionId, String content, boolean 
                 .stream().map(AnswerResponse::from).toList();
         return new QuestionResponse(question.getId(), question.getSession().getId(), question.getContent(),
                 question.isAnonymous(), author, question.getAiStatus(), answers,
-                question.getCreateAt(), question.getUpdateAt(), mine);
+                question.getCreateAt(), question.getUpdateAt(), mine,
+                question.isAnswered(), question.getAnsweredAt(), question.isPresenterRequested(),
+                question.getPresenterRequestedAt(), question.getLikedBy().size(), likedByMe);
     }
 
     public record UserSummary(Long id, String username) {}

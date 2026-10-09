@@ -9,4 +9,5 @@ public interface SessionParticipantRepository extends JpaRepository<SessionParti
     Optional<SessionParticipant> findBySession_IdAndUser_Id(Long sessionId, Long userId);
     void deleteBySession_IdAndUser_Id(Long sessionId, Long userId);
     java.util.List<SessionParticipant> findBySession_Id(Long sessionId);
+    java.util.List<SessionParticipant> findByUser_Id(Long userId);
 }
