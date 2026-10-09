@@ -8,7 +8,10 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 public record QuestionResponse(Long id, Long sessionId, String content, boolean anonymous,
-                               UserSummary author, AiStatus aiStatus, List<AnswerResponse> answers,
+                               UserSummary author, AiStatus aiStatus,
+                               QuestionStatus status, LocalDateTime answeredAt,
+                               boolean presenterRequested, LocalDateTime presenterRequestedAt,
+                               List<AnswerResponse> answers,
                                LocalDateTime createdAt, LocalDateTime updatedAt,
                                @JsonInclude(JsonInclude.Include.NON_NULL) Boolean mine) {
 
@@ -40,7 +43,10 @@ public record QuestionResponse(Long id, Long sessionId, String content, boolean 
         List<AnswerResponse> answers = answerRepository.findByQuestion_IdOrderByIdAsc(question.getId())
                 .stream().map(AnswerResponse::from).toList();
         return new QuestionResponse(question.getId(), question.getSession().getId(), question.getContent(),
-                question.isAnonymous(), author, question.getAiStatus(), answers,
+                question.isAnonymous(), author, question.getAiStatus(),
+                question.getStatus(), question.getAnsweredAt(),
+                question.isPresenterRequested(), question.getPresenterRequestedAt(),
+                answers,
                 question.getCreateAt(), question.getUpdateAt(), mine);
     }
 

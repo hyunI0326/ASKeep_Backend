@@ -14,6 +14,8 @@ import com.GDGoCSMU.ASKeep.domain.question.dto.AiAnswerResponse;
 import com.GDGoCSMU.ASKeep.domain.session.SessionAccessService;
 import com.GDGoCSMU.ASKeep.domain.session.entity.Session;
 import com.GDGoCSMU.ASKeep.domain.user.service.UserService;
+import com.GDGoCSMU.ASKeep.global.exception.BusinessException;
+import com.GDGoCSMU.ASKeep.global.exception.ErrorCode;
 import jakarta.persistence.EntityNotFoundException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
@@ -22,6 +24,7 @@ import org.springframework.stereotype.Service;
 
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.function.Consumer;
 import java.util.Map;
 
 @Slf4j
@@ -101,7 +104,38 @@ public class QuestionService {
         if (content == null || content.isBlank()) throw new IllegalArgumentException("content는 비어 있을 수 없습니다.");
         Answer saved = answerRepository.save(Answer.builder().content(content).type(AnswerType.PRESENTER)
                 .question(question).author(userService.getUser(userId)).build());
+        // 발표자가 답변을 달면 답변 완료로 표시
+        updateLatest(questionId, Question::markAnswered);
         publishUpdated(questionId, question.getSession().getId());
+        return saved;
+    }
+
+    /** 답변 완료 처리·취소. 발표자만, 세션 종료 후에도 가능. */
+    public Question changeStatus(Long id, Long userId, QuestionStatus status) {
+        Question question = get(id, userId);
+        sessionAccess.requireHost(question.getSession().getId(), userId);
+        if (status == QuestionStatus.ANSWERED) question.markAnswered();
+        else question.reopen();
+        Question saved = questionRepository.save(question);
+        publishUpdated(saved.getId(), saved.getSession().getId());
+        return saved;
+    }
+
+    /** 발표자에게 직접 묻기 요청. 질문 작성자만, 진행 중인 세션에서만 가능. */
+    public Question requestPresenter(Long id, Long userId) {
+        Question question = requireLiveAuthor(id, userId);
+        question.requestPresenter();
+        Question saved = questionRepository.save(question);
+        publishUpdated(saved.getId(), saved.getSession().getId());
+        return saved;
+    }
+
+    /** 발표자에게 직접 묻기 요청 취소. 질문 작성자만, 진행 중인 세션에서만 가능. */
+    public Question cancelPresenterRequest(Long id, Long userId) {
+        Question question = requireLiveAuthor(id, userId);
+        question.cancelPresenterRequest();
+        Question saved = questionRepository.save(question);
+        publishUpdated(saved.getId(), saved.getSession().getId());
         return saved;
     }
 
@@ -138,6 +172,13 @@ public class QuestionService {
         publishUpdated(questionId, sessionId);
     }
 
+    private Question requireLiveAuthor(Long id, Long userId) {
+        Question question = get(id, userId);
+        if (!question.getUser().getId().equals(userId)) throw new org.springframework.security.access.AccessDeniedException("질문 작성자만 요청할 수 있습니다.");
+        if (!question.getSession().isLive()) throw new BusinessException(ErrorCode.SESSION_NOT_IN_PROGRESS);
+        return question;
+    }
+
     private Question find(Long id) {
         return questionRepository.findById(id).orElseThrow(() -> new EntityNotFoundException("질문을 찾을 수 없습니다."));
     }
@@ -154,13 +195,24 @@ public class QuestionService {
                 AiAnswerResponse result = aiClientServer.answer(new AiAnswerRequest(sessionId, content));
                 if (result == null || result.answer() == null || result.answer().isBlank()) throw new IllegalStateException("AI 답변이 비어 있습니다.");
                 answerRepository.save(Answer.builder().content(result.answer()).type(AnswerType.AI).question(question).author(null).build());
-                question.completeAiProcessing();
+                updateLatest(questionId, Question::completeAiProcessing);
             } catch (Exception exception) {
                 log.warn("AI 답변 생성 실패 questionId={}", questionId, exception);
-                question.failAiProcessing();
+                updateLatest(questionId, Question::failAiProcessing);
             }
-            questionRepository.save(question);
             publishUpdated(questionId, sessionId);
+        });
+    }
+
+    /**
+     * 질문을 최신 상태로 다시 읽어서 바꾼 뒤 저장한다.
+     * AI 답변을 기다리는 동안 발표자가 답변 완료를 바꾸는 것처럼 두 작업이 겹칠 때,
+     * 예전에 읽어둔 질문을 그대로 저장해서 다른 쪽 변경을 덮어쓰지 않기 위해서다.
+     */
+    private void updateLatest(Long questionId, Consumer<Question> change) {
+        questionRepository.findById(questionId).ifPresent(latest -> {
+            change.accept(latest);
+            questionRepository.save(latest);
         });
     }
 

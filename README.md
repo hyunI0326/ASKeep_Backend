@@ -226,3 +226,65 @@ REST 질문 조회 응답(`QuestionResponse`)과 같은 형식입니다.
 
 - 같은 익명 질문을 발표자·작성자·다른 참여자가 조회했을 때 `author`, `mine` 확인
 - 알림에 `mine`이 없는지 확인
+
+
+==============================
+
+## feature/question-progress — 답변 완료 표시, 발표자에게 직접 묻기
+
+### 질문 객체에 추가된 필드
+
+REST 응답과 웹소켓 알림 모두 같은 필드가 들어갑니다.
+
+| 필드 | 값 | 설명 |
+|---|---|---|
+| `status` | `OPEN` / `ANSWERED` | 발표자 처리 상태. 기본 `OPEN` |
+| `answeredAt` | 시각 또는 `null` | 답변 완료로 표시된 시각 |
+| `presenterRequested` | `true` / `false` | 작성자가 발표자에게 직접 묻기를 요청했는지 |
+| `presenterRequestedAt` | 시각 또는 `null` | 요청한 시각 |
+
+- `aiStatus`(AI 처리 상태)와 `status`(발표자 처리 상태)는 따로 움직입니다
+
+### 추가된 API
+
+| 기능 | 메서드·경로 | 권한 | 성공 |
+|---|---|---|---|
+| 답변 완료 표시·취소 | `PATCH /api/v1/questions/{questionId}/status` `{"status":"ANSWERED"}` (취소는 `"OPEN"`) | 발표자 | 200 질문 객체 |
+| 직접 묻기 요청 | `POST /api/v1/questions/{questionId}/presenter-request` | 질문 작성자 · 진행 중 세션 | 200 질문 객체 |
+| 직접 묻기 취소 | `DELETE /api/v1/questions/{questionId}/presenter-request` | 질문 작성자 · 진행 중 세션 | 200 질문 객체 |
+
+- 같은 요청을 두 번 보내도 결과는 같고, 시각은 처음 값이 유지됩니다
+- 답변 완료는 세션 종료 후에도 가능합니다
+- 답변 완료된 질문에 직접 묻기를 요청하면 완료가 풀리고(`OPEN`) 새로 요청 상태가 됩니다 (꼬리질문처럼 "더 묻고 싶어요" 용도)
+- 실패: 권한 없음 403, 진행 중 세션 아님 409 `SESSION_NOT_IN_PROGRESS`, `status` 값이 없거나 잘못됨 400
+- 바뀌면 `QUESTION_UPDATED` 알림이 갑니다
+
+### 발표자 답변과의 관계
+
+- 발표자가 답변을 등록하면(`POST /questions/{id}/answers`) 자동으로 `ANSWERED`가 됩니다
+- 말로 답한 경우는 답변 없이 `PATCH .../status`로 완료만 표시하면 됩니다
+- 답변을 삭제해도 `ANSWERED`는 그대로입니다. 되돌리려면 `"OPEN"`으로 보내주세요
+
+### 백엔드 변경
+
+- `QuestionStatus` enum 추가, `Question`에 필드 4개와 변경 메서드 추가
+- 기존 DB 질문에도 값이 채워지도록 `status`는 `'OPEN'`, `presenterRequested`는 `false`를 DB 기본값으로 지정
+- AI 처리와 답변 완료 처리가 겹칠 때 서로의 변경을 덮어쓰지 않도록 수정
+  - `QuestionService.processAsync()`: AI 결과 저장 시 처음 읽은 질문 대신 최신 상태를 다시 읽어 AI 상태만 변경 (`updateLatest()`)
+  - `Question`에 `@DynamicUpdate`: 저장할 때 바뀐 칸만 UPDATE
+
+### 테스트
+
+`QuestionRealtimeTest`에 추가
+
+- 발표자 답변 등록 시 `ANSWERED`로 바뀌는지
+- 답변 완료 표시·취소, 시각, 알림
+- 청자가 완료 처리하면 403
+- 직접 묻기 요청·취소, 시각, 알림
+- 작성자가 아니면 403
+- 답변 완료된 질문에 다시 요청하면 완료가 풀리는지
+- AI 처리가 끝나도 답변 완료 상태가 유지되는지
+
+```
+.\gradlew.bat test --tests "com.GDGoCSMU.ASKeep.domain.QuestionRealtimeTest"
+```

@@ -124,10 +124,102 @@ class QuestionRealtimeTest {
         post("/api/v1/questions/" + questionId + "/answers", live.presenter(), "{\"content\":\"발표자 답변입니다\"}");
 
         String message = waitUntil(received,
-                m -> "QUESTION_UPDATED".equals(JsonPath.read(m, "$.type"))
-                        && !((List<?>) JsonPath.read(m, "$.data.answers[?(@.type == 'PRESENTER')]")).isEmpty(),
-                "발표자 답변이 포함된 QUESTION_UPDATED");
+                                m -> "QUESTION_UPDATED".equals(JsonPath.read(m, "$.type"))
+                        && !((List<?>) JsonPath.read(m, "$.data.answers[?(@.type == 'PRESENTER')]")).isEmpty()
+                        && "ANSWERED".equals(JsonPath.read(m, "$.data.status")),
+                "발표자 답변이 포함되고 답변 완료(ANSWERED)로 바뀐 QUESTION_UPDATED");
         assertEquals(questionId, (int) JsonPath.read(message, "$.data.id"));
+    }
+
+
+        @Test
+    void 발표자가_답변_완료로_표시하고_취소할_수_있다() throws Exception {
+        LiveSession live = startLiveSession();
+        BlockingQueue<String> received = subscribe(live.audience(), live.sessionId());
+        int questionId = postQuestion(live, "말로 답해주실 질문입니다");
+        String path = "/api/v1/questions/" + questionId + "/status";
+
+        Map<String, Object> answered = JsonPath.read(patch(path, live.presenter(), "{\"status\":\"ANSWERED\"}"), "$.data");
+        assertEquals("ANSWERED", answered.get("status"));
+        assertNotNull(answered.get("answeredAt"), "완료 시각이 있어야 합니다");
+
+        String message = waitUntil(received,
+                m -> "QUESTION_UPDATED".equals(JsonPath.read(m, "$.type")) && "ANSWERED".equals(JsonPath.read(m, "$.data.status")),
+                "status=ANSWERED인 QUESTION_UPDATED");
+        assertEquals(questionId, (int) JsonPath.read(message, "$.data.id"));
+
+        Map<String, Object> reopened = JsonPath.read(patch(path, live.presenter(), "{\"status\":\"OPEN\"}"), "$.data");
+        assertEquals("OPEN", reopened.get("status"));
+        assertNull(reopened.get("answeredAt"), "완료를 취소하면 완료 시각이 지워져야 합니다");
+    }
+
+    @Test
+    void AI_처리가_끝나도_발표자가_바꾼_답변_완료_상태가_유지된다() throws Exception {
+        LiveSession live = startLiveSession();
+        BlockingQueue<String> received = subscribe(live.audience(), live.sessionId());
+        int questionId = postQuestion(live, "AI 처리 중에 완료 처리할 질문입니다");
+
+        patch("/api/v1/questions/" + questionId + "/status", live.presenter(), "{\"status\":\"ANSWERED\"}");
+        waitForAiStatus(received, "FAILED");  // 테스트엔 AI 서버가 없어서 AI 처리는 실패로 끝난다
+
+        String status = JsonPath.read(get("/api/v1/questions/" + questionId, live.presenter()), "$.data.status");
+        assertEquals("ANSWERED", status, "AI 처리 결과를 저장할 때 답변 완료 상태를 덮어쓰면 안 됩니다");
+    }
+
+    @Test
+    void 답변_완료_처리는_발표자만_할_수_있다() throws Exception {
+        LiveSession live = startLiveSession();
+        int questionId = postQuestion(live, "청자가 완료 처리하면 안 됩니다");
+
+        HttpResponse<String> res = sendRaw(HttpRequest.newBuilder(uri("/api/v1/questions/" + questionId + "/status"))
+                .header("Authorization", "Bearer " + live.audience()).header("Content-Type", "application/json")
+                .method("PATCH", HttpRequest.BodyPublishers.ofString("{\"status\":\"ANSWERED\"}")));
+        assertEquals(403, res.statusCode());
+    }
+
+    @Test
+    void 작성자가_발표자에게_직접_묻기를_요청하고_취소할_수_있다() throws Exception {
+        LiveSession live = startLiveSession();
+        BlockingQueue<String> received = subscribe(live.presenter(), live.sessionId());
+        int questionId = postQuestion(live, "발표자님께 직접 여쭤보고 싶어요");
+        String path = "/api/v1/questions/" + questionId + "/presenter-request";
+
+        Map<String, Object> requested = JsonPath.read(post(path, live.audience(), null), "$.data");
+        assertEquals(true, requested.get("presenterRequested"));
+        assertNotNull(requested.get("presenterRequestedAt"), "요청 시각이 있어야 합니다");
+
+        String message = waitUntil(received,
+                m -> "QUESTION_UPDATED".equals(JsonPath.read(m, "$.type")) && Boolean.TRUE.equals(JsonPath.read(m, "$.data.presenterRequested")),
+                "presenterRequested=true인 QUESTION_UPDATED");
+        assertEquals(questionId, (int) JsonPath.read(message, "$.data.id"));
+
+        Map<String, Object> canceled = JsonPath.read(delete(path, live.audience()), "$.data");
+        assertEquals(false, canceled.get("presenterRequested"));
+        assertNull(canceled.get("presenterRequestedAt"), "요청을 취소하면 요청 시각이 지워져야 합니다");
+    }
+
+    @Test
+    void 직접_묻기_요청은_질문_작성자만_할_수_있다() throws Exception {
+        LiveSession live = startLiveSession();
+        int questionId = postQuestion(live, "작성자만 요청할 수 있는 질문입니다");
+
+        HttpResponse<String> byPresenter = sendRaw(HttpRequest.newBuilder(uri("/api/v1/questions/" + questionId + "/presenter-request"))
+                .header("Authorization", "Bearer " + live.presenter()).POST(HttpRequest.BodyPublishers.noBody()));
+        assertEquals(403, byPresenter.statusCode(), "작성자가 아니면 요청할 수 없습니다");
+    }
+
+    @Test
+    void 답변_완료된_질문에_다시_직접_묻기를_요청하면_완료가_풀린다() throws Exception {
+        LiveSession live = startLiveSession();
+        int questionId = postQuestion(live, "답변 듣고 더 궁금한 질문입니다");
+        patch("/api/v1/questions/" + questionId + "/status", live.presenter(), "{\"status\":\"ANSWERED\"}");
+
+        Map<String, Object> askedAgain = JsonPath.read(
+                post("/api/v1/questions/" + questionId + "/presenter-request", live.audience(), null), "$.data");
+        assertEquals("OPEN", askedAgain.get("status"), "다시 요청하면 답변 완료가 풀려야 합니다");
+        assertNull(askedAgain.get("answeredAt"));
+        assertEquals(true, askedAgain.get("presenterRequested"));
+        assertNotNull(askedAgain.get("presenterRequestedAt"));
     }
 
     @Test
@@ -275,10 +367,20 @@ class QuestionRealtimeTest {
         return send(b);
     }
 
+        private String patch(String path, String token, String json) throws Exception {
+        return send(HttpRequest.newBuilder(uri(path)).header("Authorization", "Bearer " + token)
+                .header("Content-Type", "application/json").method("PATCH", HttpRequest.BodyPublishers.ofString(json)));
+    }
+
     private String send(HttpRequest.Builder builder) throws Exception {
-        HttpResponse<String> res = http.send(builder.build(), HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+        HttpResponse<String> res = sendRaw(builder);
         assertTrue(res.statusCode() < 300, "HTTP " + res.statusCode() + ": " + res.body());
         return res.body();
+    }
+
+    /** 상태 코드를 직접 확인할 때 쓴다 (실패 응답도 그대로 돌려준다). */
+    private HttpResponse<String> sendRaw(HttpRequest.Builder builder) throws Exception {
+        return http.send(builder.build(), HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
     }
 
     private URI uri(String path) {

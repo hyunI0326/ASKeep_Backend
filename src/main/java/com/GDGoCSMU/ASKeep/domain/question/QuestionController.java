@@ -70,6 +70,24 @@ public class QuestionController {
         return ApiResponse.ok(QuestionResponse.forViewer(questionService.retry(questionId, viewerId), answerRepository, viewerId));
     }
 
+        @PatchMapping("/questions/{questionId}/status")
+    ApiResponse<QuestionResponse> changeStatus(@PathVariable Long questionId, @Valid @RequestBody QuestionRequests.ChangeStatus request) {
+        Long viewerId = CurrentUser.id();
+        return ApiResponse.ok(QuestionResponse.forViewer(questionService.changeStatus(questionId, viewerId, request.status()), answerRepository, viewerId));
+    }
+
+    @PostMapping("/questions/{questionId}/presenter-request")
+    ApiResponse<QuestionResponse> requestPresenter(@PathVariable Long questionId) {
+        Long viewerId = CurrentUser.id();
+        return ApiResponse.ok(QuestionResponse.forViewer(questionService.requestPresenter(questionId, viewerId), answerRepository, viewerId));
+    }
+
+    @DeleteMapping("/questions/{questionId}/presenter-request")
+    ApiResponse<QuestionResponse> cancelPresenterRequest(@PathVariable Long questionId) {
+        Long viewerId = CurrentUser.id();
+        return ApiResponse.ok(QuestionResponse.forViewer(questionService.cancelPresenterRequest(questionId, viewerId), answerRepository, viewerId));
+    }
+    
     private void validatePage(int page, int size) {
         if (page < 0 || size < 1 || size > 100) throw new IllegalArgumentException("page/size 범위가 올바르지 않습니다.");
     }
