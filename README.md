@@ -73,6 +73,36 @@ Spring 재배포가 필요합니다. 운영 DB 스키마를 수동 관리한다�
 현재 기본 `ddl-auto=update`도 새 필드와 공감 테이블을 생성합니다. 기존 청자의 입장 시각은 기록이 없어 `null`일 수 있습니다.
 프론트 UI 연동과 실제 개발 서버 배포는 별도 작업입니다. 요청·응답 예시는 `api_secp.md`에 정리했습니다.
 
+## feature/question-request-cancel — 직접 묻기 취소, 발표자 답변 시 자동 완료
+ #14(답변 완료·직접 묻기·공감) 위에 추가한 내용입니다.
+
+### 추가·변경된 동작
+
+| 기능 | 메서드·경로 | 권한 | 성공 |
+|---|---|---|---|
+| 직접 묻기 요청 취소 | `DELETE /api/v1/questions/{questionId}/presenter-request` | 질문 작성자 · 진행 중 세션 | 200 질문 객체 |
+
+- 취소하면 `presenterRequested: false`, `presenterRequestedAt: null`이 되고 `QUESTION_UPDATED` 알림이 갑니다. 요청하지 않은 상태에서 취소해도 200입니다
+- 발표자가 답변을 등록하면(`POST /questions/{id}/answers`) 자동으로 `answered: true`가 됩니다. 이미 완료된 질문이면 처음 완료 시각을 유지합니다
+- 답변을 삭제해도 완료 상태는 그대로입니다. 되돌리려면 `DELETE /questions/{id}/answered`를 호출하세요
+
+### 수정
+
+- `answeredAt`, `presenterRequestedAt`을 소수점 6자리(마이크로초)로 맞춤
+  - DB는 6자리까지만 저장해서, Windows처럼 7자리 이상 시각이 나오는 환경에서는 처음 응답과 다시 조회한 값이 달라 보였습니다
+  - `QuestionRealtimeTest`의 `완료표시는_발표자가_설정취소하고_직접요청은_작성자가_한다`가 Windows에서 실패하던 원인입니다
+
+### 테스트
+
+`QuestionRealtimeTest`에 추가
+
+- 작성자가 직접 묻기를 취소하면 `presenterRequested`가 풀리고 알림이 가는지, 작성자가 아니면 403
+- 발표자 답변 등록 시 자동으로 답변 완료되는지
+
+```
+.\gradlew.bat test --tests "com.GDGoCSMU.ASKeep.domain.QuestionRealtimeTest"
+```
+
 ## 추가·변경된 API
 
 | 기능 | 메서드·경로 | 권한 | 성공 |

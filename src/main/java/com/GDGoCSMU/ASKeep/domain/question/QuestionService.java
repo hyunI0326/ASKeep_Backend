@@ -94,6 +94,20 @@ public class QuestionService {
         return question;
     }
 
+    /** 직접 묻기 요청 취소. 질문 작성자만, 진행 중인 세션에서만 가능. */
+    @Transactional
+    public Question cancelPresenterRequest(Long id, Long userId) {
+        Question question = findForUpdate(id);
+        sessionAccess.requireLiveMember(question.getSession().getId(), userId);
+        if (!question.getUser().getId().equals(userId)) throw new AccessDeniedException("질문 작성자만 취소할 수 있습니다.");
+        if (question.isPresenterRequested()) {
+            question.cancelPresenterRequest();
+            questionRepository.saveAndFlush(question);
+            publishUpdated(id, question.getSession().getId());
+        }
+        return question;
+    }
+
     public List<Question> after(Long sessionId, Long userId, Long afterId) {
         sessionAccess.requireMember(sessionId, userId);
         return questionRepository.findBySession_IdAndIdGreaterThanOrderByIdAsc(sessionId, afterId, org.springframework.data.domain.PageRequest.of(0, 100));
@@ -143,12 +157,18 @@ public class QuestionService {
         return question;
     }
 
+    @Transactional
     public Answer answer(Long questionId, Long userId, String content) {
-        Question question = get(questionId, userId);
+        Question question = findForUpdate(questionId);
         sessionAccess.requireHost(question.getSession().getId(), userId);
         if (content == null || content.isBlank()) throw new IllegalArgumentException("content는 비어 있을 수 없습니다.");
         Answer saved = answerRepository.save(Answer.builder().content(content).type(AnswerType.PRESENTER)
                 .question(question).author(userService.getUser(userId)).build());
+        // 발표자가 답변을 달면 답변 완료로 표시 (이미 완료면 처음 완료 시각 유지)
+        if (!question.isAnswered()) {
+            question.markAnswered(true);
+            questionRepository.saveAndFlush(question);
+        }
         publishUpdated(questionId, question.getSession().getId());
         return saved;
     }
