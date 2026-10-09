@@ -8,6 +8,8 @@ import org.springframework.context.ApplicationEventPublisher;
 import com.GDGoCSMU.ASKeep.domain.answer.Answer;
 import com.GDGoCSMU.ASKeep.domain.answer.AnswerRepository;
 import com.GDGoCSMU.ASKeep.domain.answer.AnswerType;
+import com.GDGoCSMU.ASKeep.domain.material.Material;
+import com.GDGoCSMU.ASKeep.domain.material.MaterialRepository;
 import com.GDGoCSMU.ASKeep.domain.material.client.AiClientServer;
 import com.GDGoCSMU.ASKeep.domain.question.dto.AiAnswerRequest;
 import com.GDGoCSMU.ASKeep.domain.question.dto.AiAnswerResponse;
@@ -22,6 +24,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Consumer;
@@ -35,6 +38,7 @@ public class QuestionService {
     private final AnswerRepository answerRepository;
     private final SessionAccessService sessionAccess;
     private final UserService userService;
+    private final MaterialRepository materialRepository;
     private final AiClientServer aiClientServer;
     private final ApplicationEventPublisher eventPublisher;
     private final TransactionTemplate transactionTemplate;
@@ -194,7 +198,9 @@ public class QuestionService {
             try {
                 AiAnswerResponse result = aiClientServer.answer(new AiAnswerRequest(sessionId, content));
                 if (result == null || result.answer() == null || result.answer().isBlank()) throw new IllegalStateException("AI 답변이 비어 있습니다.");
-                answerRepository.save(Answer.builder().content(result.answer()).type(AnswerType.AI).question(question).author(null).build());
+                Answer aiAnswer = Answer.builder().content(result.answer()).type(AnswerType.AI).question(question).author(null).build();
+                addSources(aiAnswer, result.sources());
+                answerRepository.save(aiAnswer);
                 updateLatest(questionId, Question::completeAiProcessing);
             } catch (Exception exception) {
                 log.warn("AI 답변 생성 실패 questionId={}", questionId, exception);
@@ -202,6 +208,31 @@ public class QuestionService {
             }
             publishUpdated(questionId, sessionId);
         });
+    }
+
+    /**
+     * AI가 참고한 자료 조각을 답변 출처로 붙인다.
+     * 같은 자료의 같은 페이지에서 조각이 여러 개 나오면 하나로 합치고, 관련도는 가장 높은 값을 쓴다.
+     */
+    private void addSources(Answer answer, List<AiAnswerResponse.Source> sources) {
+        if (sources == null) return;
+        Map<String, AiAnswerResponse.Source> best = new LinkedHashMap<>();
+        for (AiAnswerResponse.Source source : sources) {
+            if (source == null || source.materialId() == null) continue;
+            String key = source.materialId() + "-" + source.pageNumber();
+            AiAnswerResponse.Source kept = best.get(key);
+            if (kept == null || similarity(source) > similarity(kept)) best.put(key, source);
+        }
+        Map<Long, String> fileNames = new LinkedHashMap<>();
+        for (AiAnswerResponse.Source source : best.values()) {
+            String fileName = fileNames.computeIfAbsent(source.materialId(),
+                    id -> materialRepository.findById(id).map(Material::getFileName).orElse(null));
+            answer.addSource(source.materialId(), fileName, source.pageNumber(), source.similarity());
+        }
+    }
+
+    private static double similarity(AiAnswerResponse.Source source) {
+        return source.similarity() == null ? 0 : source.similarity();
     }
 
     /**
