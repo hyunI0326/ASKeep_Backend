@@ -241,3 +241,58 @@ REST 질문 조회 응답(`QuestionResponse`)과 같은 형식입니다.
 
 - 같은 익명 질문을 발표자·작성자·다른 참여자가 조회했을 때 `author`, `mine` 확인
 - 알림에 `mine`이 없는지 확인
+
+
+==============================
+
+## feature/ai-answer-sources — AI 답변 출처
+
+AI 서버가 이미 보내주던 출처(어느 자료의 몇 페이지를 참고했는지)를 저장해서 답변에 같이 내려줍니다.
+
+### 답변 객체에 추가된 필드
+
+```json
+{
+  "id": 41,
+  "questionId": 23,
+  "content": "Pod는 컨테이너 묶음입니다...",
+  "type": "AI",
+  "author": null,
+  "sources": [
+    { "materialId": 4, "fileName": "CP_L4_2(Docker_K8s).pdf", "pageNumber": 3, "similarity": 0.82 },
+    { "materialId": 4, "fileName": "CP_L4_2(Docker_K8s).pdf", "pageNumber": 5, "similarity": 0.61 }
+  ],
+  "createdAt": "2026-10-09T17:20:05"
+}
+```
+
+| 필드 | 설명 |
+|---|---|
+| `materialId` | 자료 번호 |
+| `fileName` | 자료 파일 이름 (자료가 삭제돼도 남음) |
+| `pageNumber` | 페이지 번호 (1부터) |
+| `similarity` | 질문과의 관련도 (0~1, 클수록 관련 높음) |
+
+- 질문 응답의 `answers[]`, 답변 목록 API, 웹소켓 알림 모두 같은 형식입니다
+- 관련도 높은 순으로 정렬됩니다
+- AI는 자료 조각을 최대 5개 참고하는데, 같은 자료의 같은 페이지는 하나로 합칩니다 (관련도는 가장 높은 값)
+- 발표자 답변과 이 기능 이전에 저장된 AI 답변은 `sources: []`입니다
+
+### 백엔드 변경
+
+- `AnswerSource` 엔티티 추가 (`answer_sources` 테이블, 서버 시작 시 자동 생성)
+- `Answer`에 `sources` 목록 추가 (답변 저장·삭제 시 출처도 함께 저장·삭제)
+- `AiAnswerResponse`: `sources`를 `List<Object>`에서 형식이 있는 `Source`로 변경
+- `QuestionService.processAsync()`: AI 답변 저장 시 출처를 정리해서 함께 저장 (`addSources()`)
+- `AnswerResponse`에 `sources` 추가
+
+### 테스트
+
+`AnswerSourceTest` (가짜 AI 서버 사용, H2)
+
+- 같은 페이지 출처가 합쳐지는지, 관련도·파일 이름·정렬 확인
+- 발표자 답변의 `sources`가 빈 목록인지
+
+```
+.\gradlew.bat test --tests "com.GDGoCSMU.ASKeep.domain.AnswerSourceTest"
+```
