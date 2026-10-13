@@ -7,7 +7,7 @@ import com.GDGoCSMU.ASKeep.domain.question.AiStatus;
 
 /** AI 서버 POST /ai/answer 응답. 출처는 AI가 참고한 자료 조각 목록 (최대 5개). */
 @JsonIgnoreProperties(ignoreUnknown = true)
-public record AiAnswerResponse(Long sessionId, String question, String answer, List<Source> sources) {
+public record AiAnswerResponse(Long sessionId, String question, String answer, List<Source> sources, AiStatus status) {
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     public record Source(Long materialId, Integer pageNumber, Double similarity) {}

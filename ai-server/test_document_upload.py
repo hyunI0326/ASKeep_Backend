@@ -98,7 +98,8 @@ class MarkdownResponseTest(unittest.TestCase):
             self.assertEqual(response.status_code, 200)
             self.assertIn("application/json", response.headers["content-type"])
             body = response.json()
-            self.assertEqual(set(body), {"sessionId", "question", "answer", "sources"})
+            self.assertEqual(set(body), {"sessionId", "question", "answer", "sources", "status"})
+            self.assertEqual(body["status"], "COMPLETED")
             self.assertEqual(body["answer"], markdown)
             self.assertEqual(body["sources"][0]["materialId"], 7)
 
