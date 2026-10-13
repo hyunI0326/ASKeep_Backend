@@ -592,6 +592,12 @@ Material
 
 # Spring Boot Integration
 
+`POST /ai/answer`의 JSON 응답은 `sessionId`, `question`, `status`, `answer`, `sources`를 포함합니다.
+검색 상위 5개 중 similarity 0.8 이상인 조각만 Gemini에 전달합니다. 남는 조각이 없으면 Gemini를 호출하지 않고
+`status: "NO_EVIDENCE"`, 안내 문구, 빈 `sources`를 반환합니다. 답변 생성 시에는 `status: "COMPLETED"`입니다.
+근거 부족은 HTTP 200으로 반환하며, DB·모델 오류는 기존 오류 처리로 전달합니다.
+`/search`는 필터 전 점수를 확인하기 위해 기존 검색 결과를 유지합니다.
+
 최종 구조에서는 Frontend가 FastAPI를 직접 호출하지 않습니다.
 
 ```text

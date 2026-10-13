@@ -16,6 +16,30 @@ with patch("huggingface_hub.snapshot_download", return_value="/unused-model"), \
 
 
 class DocumentUploadTest(unittest.TestCase):
+    def test_evidence_threshold_skips_gemini_and_filters_context(self):
+        with TestClient(module.app) as client, patch.object(module, "search_similar_chunks") as search, \
+             patch.object(module, "generate_answer", return_value="자료 기반 답변") as generate:
+            for rows in ([], [(1, 7, 0, 2, "무관한 내용", 0.799999)]):
+                search.return_value = rows
+                response = client.post("/ai/answer", json={"sessionId": 3, "question": "핵심 내용은?"})
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.json(), {"sessionId": 3, "question": "핵심 내용은?",
+                    "status": "NO_EVIDENCE", "answer": "자료에서 질문에 대한 근거를 찾을 수 없습니다.", "sources": []})
+                generate.assert_not_called()
+            search.return_value = [(1, 7, 0, 2, "근거가 되는 내용", 0.8),
+                                   (2, 8, 0, 3, "제외할 내용", 0.79)]
+            response = client.post("/ai/answer", json={"sessionId": 3, "question": "핵심 내용은?"})
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json()["status"], "COMPLETED")
+            self.assertEqual(response.json()["answer"], "자료 기반 답변")
+            self.assertEqual([s["chunkId"] for s in response.json()["sources"]], [1])
+            generate.assert_called_once()
+            self.assertIn("근거가 되는 내용", generate.call_args.kwargs["context"])
+            self.assertNotIn("제외할 내용", generate.call_args.kwargs["context"])
+            search.side_effect = RuntimeError("DB unavailable")
+            with self.assertRaises(RuntimeError):
+                client.post("/ai/answer", json={"sessionId": 3, "question": "핵심 내용은?"})
+
     def test_multipart_pdf_and_validation(self):
         with fitz.open() as doc:
             for text in ("PDF transfer test", "Second page"):

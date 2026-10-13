@@ -234,7 +234,7 @@ class SessionSummaryAndHistoryTest {
             });
             server.createContext("/ai/answer", exchange -> {
                 exchange.getRequestBody().readAllBytes();
-                respond(exchange, 200, "{\"sessionId\":1,\"question\":\"q\",\"answer\":\"AI 답변입니다\",\"sources\":[]}");
+                respond(exchange, 200, "{\"sessionId\":1,\"question\":\"q\",\"answer\":\"AI 답변입니다\",\"sources\":[],\"status\":\"COMPLETED\"}");
             });
             server.start();
             return server;

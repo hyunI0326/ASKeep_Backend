@@ -58,6 +58,19 @@ Spring에는 재시도용 원본 PDF가 필요하므로, 재시작 후에도 재
 로컬 메모리 회귀 확인: `GEMINI_API_KEY=memory-check-not-a-real-key ai-server/.venv/bin/python ai-server/check_embedding_memory.py`
 이 검사는 시작 및 샘플 임베딩의 최대 RSS가 512MiB 미만인지 확인하며, Render Linux에서의 실측은 별도로 확인해야 합니다.
 
+## AI 답변 근거 판단
+
+AI 서버에서 검색 상위 5개 조각 중 similarity **0.8 이상**인 조각만 Gemini에 전달합니다.
+해당 조각이 없으면 Gemini 호출 없이 HTTP 200의 JSON `{ sessionId, question, status: "NO_EVIDENCE", answer, sources: [] }`를 반환합니다.
+답변 생성 시 같은 구조에 `status: "COMPLETED"`와 실제 출처를 반환합니다. `/search`는 점수 확인용으로 원래 검색 결과를 유지합니다.
+Spring은 `NO_EVIDENCE`를 질문의 `aiStatus`에 저장하고 `QUESTION_UPDATED`로 알립니다. 근거 부족 안내를 AI 답변 행으로 저장하지 않습니다.
+새 PDF 처리 후 발표자가 `FAILED` 또는 `NO_EVIDENCE` 상태의 질문을 재시도할 수 있습니다.
+
+**FastAPI와 Spring 모두 새 버전으로 배포해야 합니다.** Spring DB에 기존 enum CHECK가 있으면
+`db/question-ai-status.sql`로 갱신하세요. `ddl-auto=update`여도 기존 CHECK 갱신 여부는 확인해야 합니다.
+기본 Hibernate 제약 이름과 다르면 실제 제약 이름을 확인해 적용해야 합니다.
+0.8은 초기 휴리스틱이며 실제 질문·PDF로 아직 보정하지 않았습니다. 프론트의 새 상태 표시도 별도로 연결해야 합니다.
+
 ## 질문·세션 체크리스트 기능
 
 - 답변 완료: 발표자가 `PUT /api/v1/questions/{id}/answered`로 설정하고 `DELETE`로 취소합니다.
@@ -147,6 +160,7 @@ Spring 재배포가 필요합니다. 운영 DB 스키마를 수동 관리한다�
 | 질문 등록 | `QUESTION_CREATED` | 질문 객체 (`aiStatus: PENDING`) |
 | AI 답변 생성 시작 | `QUESTION_UPDATED` | 질문 객체 (`aiStatus: PROCESSING`) |
 | AI 답변 완료 | `QUESTION_UPDATED` | 질문 객체 (`aiStatus: COMPLETED`, `answers`에 AI 답변 포함) |
+| 자료에 근거 없음 | `QUESTION_UPDATED` | 질문 객체 (`aiStatus: NO_EVIDENCE`, AI 답변 추가 없음) |
 | AI 답변 실패 | `QUESTION_UPDATED` | 질문 객체 (`aiStatus: FAILED`) |
 | AI 재시도 | `QUESTION_UPDATED` | 질문 객체 (`aiStatus: PENDING`) |
 | 질문 수정 | `QUESTION_UPDATED` | 질문 객체 |
@@ -178,7 +192,7 @@ REST 질문 조회 응답(`QuestionResponse`)과 같은 형식입니다.
 
 ### 프론트 참고
 
-- 질문 하나에 알림이 여러 번 옵니다: `CREATED` → `UPDATED(PROCESSING)` → `UPDATED(COMPLETED 또는 FAILED)`
+- 질문 하나에 알림이 여러 번 옵니다: `CREATED` → `UPDATED(PROCESSING)` → `UPDATED(COMPLETED, NO_EVIDENCE 또는 FAILED)`
 - `QUESTION_CREATED` / `QUESTION_UPDATED`: 같은 `id`가 없으면 추가, 있으면 **`updatedAt`이 더 최신일 때만 통째로 교체**. 순서가 뒤바뀌어 와도 오래된 내용이 덮어쓰지 않습니다
 - `QUESTION_DELETED`: `data.questionId`에 해당하는 질문을 목록에서 제거
 - 로컬에서 AI 서버를 안 켜면 AI 단계는 항상 `FAILED`로 끝납니다 (정상)

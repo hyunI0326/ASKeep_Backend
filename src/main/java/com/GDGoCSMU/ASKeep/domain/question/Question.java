@@ -87,8 +87,8 @@ public class Question extends BaseEntity {
     }
 
     public void retryAiProcessing() {
-        if (this.aiStatus != AiStatus.FAILED) {
-            throw new IllegalStateException("실패한 질문만 재시도할 수 있습니다.");
+        if (this.aiStatus != AiStatus.FAILED && this.aiStatus != AiStatus.NO_EVIDENCE) {
+            throw new IllegalStateException("실패했거나 자료에 근거가 없는 질문만 재시도할 수 있습니다.");
         }
         this.aiStatus = AiStatus.PENDING;
     }

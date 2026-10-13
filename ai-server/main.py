@@ -38,6 +38,8 @@ import json
 import re
 from typing import List, Optional
 
+MIN_SIMILARITY = 0.8
+
 
 class QuestionRequest(BaseModel):
     sessionId : int
@@ -238,9 +240,12 @@ def generate_answer(question:str, context:str):
 #rag 전체 함수
 def rag_answer(session_id:int, question:str):
     rows = search_similar_chunks(session_id=session_id, query=question, limit=5)
+    # shortcut: similarity is a relevance heuristic, calibrate against real question/PDF pairs.
+    rows = [row for row in rows if float(row[5]) >= MIN_SIMILARITY]
     if not rows:
         return {
-            "answer": "관련 자료를 찾을 수 없습니다.",
+            "status": "NO_EVIDENCE",
+            "answer": "자료에서 질문에 대한 근거를 찾을 수 없습니다.",
             "sources": []
         }
     context = build_context(rows)
@@ -255,6 +260,7 @@ def rag_answer(session_id:int, question:str):
             "similarity": float(row[5])
         })
     return {
+        "status": "COMPLETED",
         "answer":answer,
         "sources":sources
     }
@@ -378,6 +384,7 @@ def ai_answer(request:QuestionRequest):
     return {
         "sessionId": request.sessionId,
         "question" : request.question,
+        "status": result["status"],
         "answer" : result["answer"],
         "sources" : result["sources"]
     }

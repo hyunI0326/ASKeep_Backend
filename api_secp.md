@@ -68,7 +68,7 @@
 }
 ```
 
-자료 업로드와 질문 등록, AI 재시도는 `202 Accepted`를 반환한 뒤 AI 처리를 진행합니다. 반환 직후 상태가 `PENDING`이었다가 `PROCESSING`, `COMPLETED` 또는 `FAILED`로 바뀔 수 있으므로 상세·목록 API로 상태를 다시 조회하세요.
+자료 업로드와 질문 등록, AI 재시도는 `202 Accepted`를 반환한 뒤 AI 처리를 진행합니다. 반환 직후 상태가 `PENDING`이었다가 `PROCESSING`, `COMPLETED` 또는 `FAILED`로 바뀔 수 있으므로 상세·목록 API로 상태를 다시 조회하세요. 질문의 AI 답변은 자료에 근거가 없으면 `NO_EVIDENCE`로 끝납니다.
 
 ## 2. 인증·사용자
 
@@ -297,7 +297,12 @@
 }
 ```
 
-`author.username`에는 사용자의 `name` 값이 들어갑니다. REST에서 익명 질문의 작성자는 발표자와 본인에게만 보이고, 다른 참여자에게는 `author:null`입니다. `mine`은 익명 여부와 무관하게 본인 질문이면 `true`입니다. `aiStatus` 값은 `PENDING`, `PROCESSING`, `COMPLETED`, `FAILED`입니다.
+`author.username`에는 사용자의 `name` 값이 들어갑니다. REST에서 익명 질문의 작성자는 발표자와 본인에게만 보이고, 다른 참여자에게는 `author:null`입니다. `mine`은 익명 여부와 무관하게 본인 질문이면 `true`입니다. `aiStatus` 값은 `PENDING`, `PROCESSING`, `COMPLETED`, `NO_EVIDENCE`, `FAILED`입니다.
+
+- AI 서버는 검색 상위 5개 조각 중 cosine similarity가 **0.8 이상**인 조각만 답변에 사용합니다. 자료가 없거나 기준을 넘는 조각이 없으면 Gemini 호출을 생략합니다.
+- `NO_EVIDENCE`는 처리 오류가 아닌 정상적인 근거 부족 결과입니다. 이 경우 AI 답변 행은 추가하지 않으며, 기존 발표자 답변은 유지합니다. DB·임베딩·Gemini 호출 오류는 `FAILED`입니다.
+- `QUESTION_UPDATED`에도 `aiStatus: NO_EVIDENCE`가 전달됩니다. 프론트는 ‘자료에 근거 없음’ 상태를 표시해야 합니다.
+- 새 자료 업로드·처리 후 발표자가 `NO_EVIDENCE` 질문의 AI 답변을 재시도할 수 있습니다.
 
 - `answered`는 발표자가 수동으로 설정하는 완료 표시이며 AI 처리 상태와 별개입니다. 완료 취소 시 `answeredAt`은 `null`이 됩니다.
 - `presenterRequested`와 `presenterRequestedAt`은 질문 작성자의 직접 묻기 요청 여부·최초 요청 시각입니다. 요청 취소 API는 없습니다.
@@ -307,7 +312,7 @@
 - 완료·직접 요청·공감 변경은 기존 `QUESTION_UPDATED` 웹소켓 알림으로 전달됩니다. 알림에는 공통 상태와 `likeCount`가 포함되며, 개인별 `mine`, `likedByMe`는 빠집니다. 프론트에서 기존 개인별 값을 유지하거나 REST로 다시 조회해야 합니다. 익명 알림의 작성자는 항상 숨깁니다.
 
 - 등록·조회는 세션 발표자 또는 참여자만 가능합니다. 등록은 세션이 진행 중(`ONGOING`)일 때만 가능하며, 시작 전·종료 후에는 409 `SESSION_NOT_IN_PROGRESS`입니다. 질문 수정은 작성자만, AI 처리가 시작되기 전(`PENDING`)에만 가능합니다.
-- 삭제는 작성자 또는 발표자가 할 수 있습니다. AI 답변 재시도는 발표자만, `FAILED` 상태에서만 가능합니다.
+- 삭제는 작성자 또는 발표자가 할 수 있습니다. AI 답변 재시도는 발표자만, `FAILED` 또는 `NO_EVIDENCE` 상태에서 가능합니다.
 - Polling은 `afterId`보다 큰 ID를 오름차순으로 최대 100개 반환하며 기존 질문의 공감·상태 변경은 반환하지 않습니다. 변경은 웹소켓 또는 재조회로 반영합니다.
 
 Polling 응답 예시:

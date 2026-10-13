@@ -4,5 +4,6 @@ public enum AiStatus {
     PENDING,
     PROCESSING,
     COMPLETED,
+    NO_EVIDENCE,
     FAILED
 }

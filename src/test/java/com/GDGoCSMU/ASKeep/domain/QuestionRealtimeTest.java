@@ -8,6 +8,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import com.GDGoCSMU.ASKeep.domain.material.client.AiClientServer;
 import com.GDGoCSMU.ASKeep.domain.question.dto.AiAnswerResponse;
+import com.GDGoCSMU.ASKeep.domain.question.AiStatus;
 import java.util.concurrent.CountDownLatch;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
@@ -270,7 +271,8 @@ class QuestionRealtimeTest {
         when(aiClient.answer(any())).thenAnswer(invocation -> {
             entered.countDown();
             assertTrue(release.await(5, TimeUnit.SECONDS));
-            return new AiAnswerResponse(live.sessionId(), "질문", "AI 답변", java.util.List.of());
+            return new AiAnswerResponse(live.sessionId(), "질문", "AI 답변", java.util.List.of(),
+                    com.GDGoCSMU.ASKeep.domain.question.AiStatus.COMPLETED);
         });
         BlockingQueue<String> received = subscribe(live.audience(), live.sessionId());
         int id = postQuestion(live, "처리 중에도 상태가 유지되는 질문");
@@ -291,6 +293,38 @@ class QuestionRealtimeTest {
         assertEquals(true, JsonPath.read(response, "$.data.presenterRequested"));
         assertEquals(1, (int) JsonPath.read(response, "$.data.likeCount"));
         assertEquals(true, JsonPath.read(response, "$.data.likedByMe"));
+    }
+
+    @Test
+    void 근거없음은_실패와_구분되어_알림으로_전달되고_재시도할_수_있다() throws Exception {
+        LiveSession live = startLiveSession();
+        when(aiClient.answer(any())).thenReturn(new AiAnswerResponse(live.sessionId(), "질문",
+                "자료에서 질문에 대한 근거를 찾을 수 없습니다.", List.of(), AiStatus.NO_EVIDENCE));
+        BlockingQueue<String> received = subscribe(live.audience(), live.sessionId());
+        int id = postQuestion(live, "자료에 근거가 없는 질문");
+        waitForAiStatus(received, "NO_EVIDENCE");
+        String path = "/api/v1/questions/" + id;
+        String response = get(path, live.audience());
+        assertEquals("NO_EVIDENCE", JsonPath.read(response, "$.data.aiStatus"));
+        assertEquals(0, (int) JsonPath.read(response, "$.data.answers.length()"));
+        assertEquals(403, http.send(HttpRequest.newBuilder(uri(path + "/ai-answer/retry"))
+                .header("Authorization", "Bearer " + live.audience()).POST(HttpRequest.BodyPublishers.noBody())
+                .build(), HttpResponse.BodyHandlers.ofString()).statusCode());
+        when(aiClient.answer(any())).thenReturn(new AiAnswerResponse(live.sessionId(), "질문",
+                "새 자료를 기반으로 한 답변", List.of(), AiStatus.COMPLETED));
+        post(path + "/ai-answer/retry", live.presenter(), null);
+        waitForAiStatus(received, "COMPLETED");
+        assertEquals("새 자료를 기반으로 한 답변", JsonPath.read(get(path, live.audience()), "$.data.answers[0].content"));
+    }
+
+    @Test
+    void AI_서버가_상태없는_응답을_주면_근거없음으로_처리하지_않고_실패한다() throws Exception {
+        LiveSession live = startLiveSession();
+        when(aiClient.answer(any())).thenReturn(new AiAnswerResponse(live.sessionId(), "질문", "응답", List.of(), null));
+        BlockingQueue<String> received = subscribe(live.audience(), live.sessionId());
+        int id = postQuestion(live, "잘못된 AI 응답 확인");
+        waitForAiStatus(received, "FAILED");
+        assertEquals(0, (int) JsonPath.read(get("/api/v1/questions/" + id, live.audience()), "$.data.answers.length()"));
     }
 
     // --- helpers ---
