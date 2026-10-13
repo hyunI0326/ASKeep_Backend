@@ -10,6 +10,7 @@ import java.util.List;
 import java.util.HashSet;
 import java.util.Set;
 import java.time.LocalDateTime;
+import java.time.temporal.ChronoUnit;
 import org.hibernate.annotations.BatchSize;
 
 @Entity
@@ -69,13 +70,22 @@ public class Question extends BaseEntity {
     public boolean isAnswered() { return answeredAt != null; }
     public boolean isPresenterRequested() { return presenterRequestedAt != null; }
 
-    public void markAnswered(boolean answered) {
+        public void markAnswered(boolean answered) {
         if (!answered) answeredAt = null;
-        else if (answeredAt == null) answeredAt = LocalDateTime.now();
+        else if (answeredAt == null) answeredAt = now();
     }
 
     public void requestPresenter() {
-        if (presenterRequestedAt == null) presenterRequestedAt = LocalDateTime.now();
+        if (presenterRequestedAt == null) presenterRequestedAt = now();
+    }
+
+    public void cancelPresenterRequest() {
+        presenterRequestedAt = null;
+    }
+
+    /** DB가 소수점 6자리(마이크로초)까지만 저장하므로 처음 응답과 나중 조회 값이 같도록 6자리로 맞춘다 */
+    private static LocalDateTime now() {
+        return LocalDateTime.now().truncatedTo(ChronoUnit.MICROS);
     }
 
     public void completeAiProcessing() {
