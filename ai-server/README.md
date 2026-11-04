@@ -4,7 +4,7 @@ ASKeep 프로젝트의 **자료 처리 및 RAG용 AI 서버**입니다.
 
 FastAPI를 기반으로 사용자가 업로드한 PDF 자료를 텍스트로 추출하고, 일정 크기의 Chunk로 분할한 뒤 PostgreSQL에 저장합니다.
 
-추후 `pgvector` 기반 Vector Search와 Gemini API를 연결하여 업로드된 자료를 기반으로 질문에 답변하는 RAG 구조로 확장할 예정입니다.
+`pgvector` 기반 Vector Search와 OpenAI API를 이용해 업로드된 자료를 기반으로 질문에 답변합니다.
 
 ---
 
@@ -42,7 +42,7 @@ pgvector Similarity Search
      ↓
 Relevant Chunks
      ↓
-Gemini API
+OpenAI API
      ↓
 AI Answer
 ```
@@ -61,9 +61,6 @@ AI Answer
 - ONNX Runtime + SentencePiece (INT8 multilingual-e5-small, 384차원)
 - Uvicorn
 
-향후 추가 예정:
-
-- Gemini API
 
 ---
 
@@ -227,7 +224,7 @@ uv sync
 또는 필요한 라이브러리를 직접 설치할 수 있습니다.
 
 ```bash
-uv add fastapi python-multipart uvicorn pymupdf "psycopg[binary]" pgvector onnxruntime sentencepiece huggingface-hub numpy python-dotenv google-genai
+uv add fastapi python-multipart uvicorn pymupdf "psycopg[binary]" pgvector onnxruntime sentencepiece huggingface-hub numpy python-dotenv openai
 ```
 
 ---
@@ -253,7 +250,7 @@ DB_NAME=askeep
 DB_USER=postgres
 DB_PASSWORD=your_password
 
-GEMINI_API_KEY=your_gemini_api_key
+OPENAI_API_KEY=your_openai_api_key
 ```
 
 각자 자신의 환경에 맞게 `.env`를 수정합니다.
@@ -268,7 +265,7 @@ DB_USER=postgres
 DB_PASSWORD=password
 ```
 
-`GEMINI_API_KEY`는 현재 구현에서는 사용하지 않으며 Gemini API 연동 단계에서 사용할 예정입니다.
+`OPENAI_API_KEY`는 OpenAI 답변과 세션 요약 생성에 사용합니다.
 
 ---
 
@@ -289,7 +286,7 @@ __pycache__/
 
 ```text
 DB Password
-Gemini API Key
+OpenAI API Key
 기타 Secret Key
 ```
 
@@ -593,7 +590,7 @@ Material
 # Spring Boot Integration
 
 `POST /ai/answer`의 JSON 응답은 `sessionId`, `question`, `status`, `answer`, `sources`를 포함합니다.
-검색 상위 5개 중 similarity 0.8 이상인 조각만 Gemini에 전달합니다. 남는 조각이 없으면 Gemini를 호출하지 않고
+검색 상위 5개 중 similarity 0.8 이상인 조각만 OpenAI에 전달합니다. 남는 조각이 없으면 OpenAI를 호출하지 않고
 `status: "NO_EVIDENCE"`, 안내 문구, 빈 `sources`를 반환합니다. 답변 생성 시에는 `status: "COMPLETED"`입니다.
 근거 부족은 HTTP 200으로 반환하며, DB·모델 오류는 기존 오류 처리로 전달합니다.
 `/search`는 필터 전 점수를 확인하기 위해 기존 검색 결과를 유지합니다.
@@ -622,7 +619,7 @@ Render 서비스여도 PDF 파일을 HTTP로 전달하므로 공유 디스크 �
 재시도를 위해 Spring은 원본 PDF를 보관해야 합니다. Spring의 저장 파일이 재배포 시
 사라지는 환경에서는 영속 디스크 또는 별도 파일 저장소가 필요합니다.
 
-수신 검증 테스트(DB/Gemini/임베딩 모델 다운로드 불필요):
+수신 검증 테스트(DB/OpenAI 호출/임베딩 모델 다운로드 불필요):
 
 ```bash
 python test_document_upload.py
@@ -663,7 +660,7 @@ Vector Similarity Search
         ↓
 Relevant Chunk TOP-K
         ↓
-Gemini API
+OpenAI API
         ↓
 RAG Answer 생성
 ```
@@ -750,7 +747,15 @@ Embedding
  ↓
 pgvector
  ↓
-Gemini API
+OpenAI API
 ```
 
 를 순차적으로 연결할 예정입니다.
+# 슬라이드 뷰어와 구조화 요약
+
+- `/documents/process` 응답에 `pageCount`를 추가합니다(빈 페이지 포함).
+- `POST /documents/page-count`: multipart `file`(PDF), 응답 `{"pageCount":2}`.
+- `POST /documents/render-page`: multipart `file`(PDF), `pageNumber`(1부터), 응답 `image/png`. 한 번에 한 페이지만 변환하고 긴 변을 1600px로 제한합니다.
+- 위 두 뷰어 요청은 DB·임베딩·OpenAI 사용하지 않습니다. 프론트는 인증·세션 권한을 검사하는 Spring API를 사용합니다.
+- `/sessions/summary`는 `sections: [{"title":"소제목","description":"설명"}]` 목록과 기존 `summary`, `tags`를 반환합니다. `summary`는 sections를 Markdown으로 합친 문자열입니다.
+- 새 소제목·설명은 빈 값이 아닌 문자열이며 소제목 200자, 설명 5000자, 항목 1~20개를 검사합니다. 잘못된 AI 출력은 500으로 전달되어 Spring 요약 상태가 FAILED가 됩니다.

@@ -40,6 +40,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class SessionSummaryAndHistoryTest {
 
     static final AtomicBoolean aiFails = new AtomicBoolean(false);
+    static final AtomicBoolean legacySummary = new AtomicBoolean(false);
     static final List<String> summaryRequests = new CopyOnWriteArrayList<>();
     static final HttpServer fakeAi = startFakeAi();
 
@@ -80,6 +81,9 @@ class SessionSummaryAndHistoryTest {
         String done = waitForSummary(base, audience, "COMPLETED");
         assertEquals("JPA 스터디에서 N+1 문제를 다뤘습니다.", JsonPath.read(done, "$.data.summary"));
         assertEquals(List.of("JPA", "N+1"), JsonPath.read(done, "$.data.tags"));  // '#' 제거, 빈 태그·중복 제거
+        assertEquals("N+1 문제", JsonPath.read(done, "$.data.sections[0].title"));
+        assertEquals("연관 엔티티를 조회할 때 추가 쿼리가 발생합니다.", JsonPath.read(done, "$.data.sections[0].description"));
+        assertEquals("해결 방법", JsonPath.read(done, "$.data.sections[1].title"));
         String sent = summaryRequests.stream().filter(r -> r.contains("\"sessionId\":" + sessionId)).findFirst().orElseThrow();
         assertTrue(sent.contains("JPA 스터디") && sent.contains("N+1 문제가 뭔가요?"), sent);
 
@@ -174,6 +178,22 @@ class SessionSummaryAndHistoryTest {
 
     // --- helpers ---
 
+    @Test
+    void 이전_AI_응답도_단일_요약_항목으로_조회할_수_있다() throws Exception {
+        String presenter = signupAndLogin();
+        String base = "/api/v1/sessions/" + createSession(presenter, "이전 AI 서버");
+        mvc.perform(post(base + "/start").header("Authorization", "Bearer " + presenter)).andExpect(status().isOk());
+        legacySummary.set(true);
+        try {
+            mvc.perform(post(base + "/end").header("Authorization", "Bearer " + presenter)).andExpect(status().isOk());
+            String done = waitForSummary(base, presenter, "COMPLETED");
+            assertEquals("세션 요약", JsonPath.read(done, "$.data.sections[0].title"));
+            assertEquals(JsonPath.<String>read(done, "$.data.summary"), JsonPath.<String>read(done, "$.data.sections[0].description"));
+        } finally {
+            legacySummary.set(false);
+        }
+    }
+
     /** 비동기 요약이 기대 상태가 될 때까지 최대 10초 기다린다 */
     private String waitForSummary(String base, String token, String expected) throws Exception {
         String last = null;
@@ -228,9 +248,13 @@ class SessionSummaryAndHistoryTest {
                     return;
                 }
                 Number id = JsonPath.read(req, "$.sessionId");
+                String sections = legacySummary.get() ? "" : """
+                        ,"sections":[{"title":"N+1 문제","description":"연관 엔티티를 조회할 때 추가 쿼리가 발생합니다."},
+                                     {"title":"해결 방법","description":"fetch join을 사용합니다."}]
+                        """;
                 respond(exchange, 200, """
-                        {"sessionId":%d,"summary":"JPA 스터디에서 N+1 문제를 다뤘습니다.","tags":["#JPA"," N+1 ","",  "JPA"]}"""
-                        .formatted(id.longValue()));
+                        {"sessionId":%d,"summary":"JPA 스터디에서 N+1 문제를 다뤘습니다.","tags":["#JPA"," N+1 ","", "JPA"]%s}"""
+                        .formatted(id.longValue(), sections));
             });
             server.createContext("/ai/answer", exchange -> {
                 exchange.getRequestBody().readAllBytes();

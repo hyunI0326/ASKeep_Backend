@@ -26,6 +26,8 @@ public class Material extends BaseEntity {
 
     private Long fileSize;
 
+    private Integer pageCount;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     private ProcessingStatus status;

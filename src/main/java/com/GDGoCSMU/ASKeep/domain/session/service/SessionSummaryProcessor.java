@@ -41,7 +41,7 @@ public class SessionSummaryProcessor {
             if (response == null || response.summary() == null || response.summary().isBlank()) {
                 throw new IllegalStateException("AI 요약이 비어 있습니다.");
             }
-            summaryService.complete(sessionId, response.summary(), response.tags());
+            summaryService.complete(sessionId, response.summary(), response.tags(), response.sections());
         } catch (Exception e) {
             log.warn("세션 {} 요약 실패: {}", sessionId, e.getMessage());
             summaryService.fail(sessionId);

@@ -7,6 +7,7 @@ import com.GDGoCSMU.ASKeep.domain.question.QuestionRepository;
 import com.GDGoCSMU.ASKeep.domain.session.SessionParticipantRepository;
 import com.GDGoCSMU.ASKeep.domain.session.entity.Session;
 import com.GDGoCSMU.ASKeep.domain.session.entity.SessionSummary;
+import com.GDGoCSMU.ASKeep.domain.session.entity.SummarySection;
 import com.GDGoCSMU.ASKeep.domain.session.repository.SessionRepository;
 import com.GDGoCSMU.ASKeep.domain.session.repository.SessionSummaryRepository;
 import com.GDGoCSMU.ASKeep.domain.session.dto.AiSummaryRequest;
@@ -96,9 +97,27 @@ public class SessionSummaryService {
     }
 
     @Transactional
-    public void complete(Long sessionId, String summaryText, List<String> tags) {
+    public void complete(Long sessionId, String summaryText, List<String> tags, List<SummarySection> sections) {
+        List<SummarySection> cleaned = cleanSections(summaryText, sections);
         summaryRepository.findBySession_Id(sessionId)  // 그 사이 세션이 삭제됐으면 무시
-                .ifPresent(s -> s.complete(summaryText.trim(), cleanTags(tags)));
+                .ifPresent(s -> s.complete(summaryText.trim(), cleanTags(tags), cleaned));
+    }
+
+    private static List<SummarySection> cleanSections(String summaryText, List<SummarySection> sections) {
+        // 이전 AI 서버 응답도 배포 순서와 무관하게 저장할 수 있게 한다.
+        if (sections == null) return List.of(new SummarySection("세션 요약", summaryText.trim()));
+        if (sections.isEmpty() || sections.size() > 20) throw new IllegalArgumentException("요약 항목은 1~20개여야 합니다.");
+        return sections.stream().map(section -> {
+            if (section == null || section.getTitle() == null || section.getDescription() == null) {
+                throw new IllegalArgumentException("요약 소제목과 설명이 필요합니다.");
+            }
+            String title = section.getTitle().trim();
+            String description = section.getDescription().trim();
+            if (title.isEmpty() || title.length() > 200 || description.isEmpty() || description.length() > 5000) {
+                throw new IllegalArgumentException("요약 소제목 또는 설명의 길이가 올바르지 않습니다.");
+            }
+            return new SummarySection(title, description);
+        }).toList();
     }
 
     @Transactional

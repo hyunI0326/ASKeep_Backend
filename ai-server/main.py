@@ -26,19 +26,19 @@ tokenizer = spm.SentencePieceProcessor(model_file=str(model_dir / "sentencepiece
 embedding_lock = Lock()
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi.responses import Response
 from pydantic import BaseModel
 import pymupdf as fitz
 import psycopg
 from pgvector.psycopg import register_vector
 from pgvector import Vector
-from google import genai
-from google.genai.errors import ServerError
-import time
+from openai import OpenAI
 import json
 import re
 from typing import List, Optional
 
 MIN_SIMILARITY = 0.8
+pdf_render_lock = Lock()
 
 
 class QuestionRequest(BaseModel):
@@ -223,21 +223,12 @@ def generate_answer(question:str, context:str):
 [질문]
 {question}
 """
-    for attempt in range(4):
-        try:
-            response = gemini_client.models.generate_content(
-                model="gemini-3.8-flash",
-                contents=prompt
-            )
+    response = openai_client.responses.create(
+                model="gpt-4.1-mini",
+                input=prompt
+    )
 
-            return response.text
-        except ServerError as e:
-            if e.code == 503 and attempt < 3:
-                delay = 2**attempt
-                print(f"Gemini 서버 혼잡, {delay}초 후 재시도...")
-                time.sleep(delay)
-            else:
-                raise
+    return response.output_text
 
 #rag 전체 함수
 def rag_answer(session_id:int, question:str):
@@ -269,8 +260,10 @@ def rag_answer(session_id:int, question:str):
 
 
 app = FastAPI()
-gemini_client=genai.Client(
-    api_key=os.getenv("GEMINI_API_KEY")
+# gemini_client=genai.Client(
+#     api_key=os.getenv("GEMINI_API_KEY")
+openai_client=OpenAI(
+    api_key=os.getenv("OPENAI_API_KEY")
 )
 
 #db 연결
@@ -300,13 +293,7 @@ def process_document(
     file: UploadFile = File(...),
 ):
     try:
-        if not file.filename or not file.filename.lower().endswith(".pdf"):
-            raise HTTPException(status_code=415, detail="PDF 파일만 업로드할 수 있습니다.")
-        pdf = file.file.read(50 * 1024 * 1024 + 1)
-        if len(pdf) > 50 * 1024 * 1024:
-            raise HTTPException(status_code=413, detail="파일은 50MB 이하여야 합니다.")
-        if not pdf.startswith(b"%PDF-"):
-            raise HTTPException(status_code=415, detail="유효한 PDF 파일이 아닙니다.")
+        pdf = read_pdf_upload(file)
         pages = extract_pdf(pdf)
         result_chunk = []
         chunk_index = 0
@@ -332,7 +319,8 @@ def process_document(
         return {
             "materialId": materialId,
             "status": "success",
-            "chunkCount": len(result_chunk)
+            "chunkCount": len(result_chunk),
+            "pageCount": len(pages)
         }
 
     except HTTPException:
@@ -342,6 +330,45 @@ def process_document(
     except Exception as e:
         print("ERROR:", type(e).__name__, str(e))
         raise HTTPException(status_code=500, detail=str(e))
+
+
+def read_pdf_upload(file: UploadFile):
+    if not file.filename or not file.filename.lower().endswith(".pdf"):
+        raise HTTPException(status_code=415, detail="PDF 파일만 업로드할 수 있습니다.")
+    pdf = file.file.read(50 * 1024 * 1024 + 1)
+    if len(pdf) > 50 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="파일은 50MB 이하여야 합니다.")
+    if not pdf.startswith(b"%PDF-"):
+        raise HTTPException(status_code=415, detail="유효한 PDF 파일이 아닙니다.")
+    return pdf
+
+
+@app.post("/documents/page-count")
+def document_page_count(file: UploadFile = File(...)):
+    try:
+        with fitz.open(stream=read_pdf_upload(file), filetype="pdf") as doc:
+            return {"pageCount": len(doc)}
+    except (fitz.FileDataError, RuntimeError) as e:
+        raise HTTPException(status_code=400, detail="PDF 파일을 읽을 수 없습니다.") from e
+
+
+@app.post("/documents/render-page")
+def render_document_page(pageNumber: int = Form(..., gt=0), file: UploadFile = File(...)):
+    # shortcut: render one page per request; persist thumbnails if viewer traffic grows.
+    with pdf_render_lock:
+        try:
+            with fitz.open(stream=read_pdf_upload(file), filetype="pdf") as doc:
+                if pageNumber > len(doc):
+                    raise HTTPException(status_code=404, detail="페이지를 찾을 수 없습니다.")
+                page = doc[pageNumber - 1]
+                longest_side = max(page.rect.width, page.rect.height)
+                if not np.isfinite(longest_side) or longest_side <= 0:
+                    raise HTTPException(status_code=400, detail="페이지 크기가 올바르지 않습니다.")
+                scale = 1600 / longest_side
+                pixmap = page.get_pixmap(matrix=fitz.Matrix(scale, scale), colorspace=fitz.csRGB, alpha=False)
+                return Response(content=pixmap.tobytes("png"), media_type="image/png")
+        except (fitz.FileDataError, RuntimeError) as e:
+            raise HTTPException(status_code=400, detail="PDF 파일을 읽을 수 없습니다.") from e
 
 
 @app.post("/search")
@@ -407,13 +434,13 @@ def generate_summary(request: SummaryRequest):
 아래 [세션 정보]와 [질문과 답변]만을 근거로 세션을 요약하고 태그를 만들어.
 
 규칙:
-1. summary: 세션에서 다룬 핵심 내용과 주요 질문을 한국어 3~6문장으로 요약한다.
-2. 질문이 없으면 세션 제목과 설명만으로 1~2문장으로 짧게 요약한다.
+1. sections: 핵심 내용과 주요 질문을 소제목(title) + 설명(description) 목록으로 정리한다. 보통 3~6개, 최대 20개.
+2. 질문이 없으면 세션 제목과 설명만으로 1개 항목으로 짧게 요약한다. title은 200자, description은 5000자 이내의 빈 값이 아닌 문자열이다.
 3. tags: 세션 주제를 나타내는 키워드 3~7개 (각 20자 이내, '#' 없이).
 4. 주어진 내용에 없는 사실을 지어내지 않는다.
-5. 반드시 {{"summary": "...", "tags": ["...", "..."]}} 형식의 JSON만 출력한다.
-6. summary 문자열의 본문은 Markdown 형식으로 작성하고, 내용에 맞게 제목, 목록, 굵은 강조를 사용한다.
-7. JSON 전체를 코드 블록으로 감싸지 않고, summary의 줄바꿈은 JSON 규칙에 맞게 이스케이프한다. tags는 일반 문자열로 유지한다.
+5. 반드시 {{"sections": [{{"title": "소제목", "description": "설명"}}], "tags": ["..."]}} 형식의 JSON만 출력한다.
+6. title은 일반 문자열, description은 필요하면 Markdown 목록과 굵은 강조를 사용한다.
+7. JSON 전체를 코드 블록으로 감싸지 않고, 줄바꿈은 JSON 규칙에 맞게 이스케이프한다. tags는 일반 문자열로 유지한다.
 
 [세션 정보]
 제목: {request.title}
@@ -422,26 +449,29 @@ def generate_summary(request: SummaryRequest):
 [질문과 답변]
 {qa_text}
 """
-    for attempt in range(4):
-        try:
-            response = gemini_client.models.generate_content(
-                model="gemini-3.8-flash",
-                contents=prompt,
-                config={"response_mime_type": "application/json"}
-            )
-            data = json.loads(response.text)
-            summary = str(data.get("summary", "")).strip()
-            tags = [str(tag).strip() for tag in data.get("tags", []) if str(tag).strip()]
-            if not summary:
-                raise ValueError("요약이 비어 있습니다.")
-            return {"summary": summary, "tags": tags}
-        except ServerError as e:
-            if e.code == 503 and attempt < 3:
-                delay = 2**attempt
-                print(f"Gemini 서버 혼잡, {delay}초 후 재시도...")
-                time.sleep(delay)
-            else:
-                raise
+    response = openai_client.responses.create(
+        model="gpt-4.1-mini",
+        input=prompt,
+        text={"format": {"type" : "json_object"}}
+    )
+    data = json.loads(response.output_text)
+    sections = data.get("sections")
+    if not isinstance(sections, list) or not 1 <= len(sections) <= 20:
+        raise ValueError("요약 항목은 1~20개여야 합니다.")
+    clean_sections = []
+    for section in sections:
+        if not isinstance(section, dict):
+            raise ValueError("요약 항목 형식이 올바르지 않습니다.")
+        title, description = section.get("title"), section.get("description")
+        if not isinstance(title, str) or not isinstance(description, str):
+            raise ValueError("요약 소제목과 설명은 문자열이어야 합니다.")
+        title, description = title.strip(), description.strip()
+        if not 1 <= len(title) <= 200 or not 1 <= len(description) <= 5000:
+            raise ValueError("요약 소제목 또는 설명의 길이가 올바르지 않습니다.")
+        clean_sections.append({"title": title, "description": description})
+    summary = "\n\n".join(f"## {s['title']}\n\n{s['description']}" for s in clean_sections)
+    tags = [str(tag).strip() for tag in data.get("tags", []) if str(tag).strip()]
+    return {"summary": summary, "sections": clean_sections, "tags": tags}
 
 
 @app.post("/sessions/summary")
@@ -451,6 +481,7 @@ def session_summary(request: SummaryRequest):
         return {
             "sessionId": request.sessionId,
             "summary": result["summary"],
+            "sections": result["sections"],
             "tags": result["tags"]
         }
     except Exception as e:

@@ -3,9 +3,12 @@ package com.GDGoCSMU.ASKeep.domain.material;
 import com.GDGoCSMU.ASKeep.domain.common.CurrentUser;
 import com.GDGoCSMU.ASKeep.domain.common.PageResponse;
 import com.GDGoCSMU.ASKeep.global.common.ApiResponse;
+import com.GDGoCSMU.ASKeep.domain.material.dto.MaterialPagesResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -38,6 +41,17 @@ public class MaterialController {
     ApiResponse<Void> delete(@PathVariable Long materialId) {
         materialService.delete(materialId, CurrentUser.id());
         return ApiResponse.ok();
+    }
+
+    @GetMapping("/materials/{materialId}/pages")
+    ApiResponse<MaterialPagesResponse> pages(@PathVariable Long materialId) {
+        return ApiResponse.ok(materialService.pages(materialId, CurrentUser.id()));
+    }
+
+    @GetMapping(value = "/materials/{materialId}/pages/{pageNumber}/image", produces = MediaType.IMAGE_PNG_VALUE)
+    ResponseEntity<byte[]> pageImage(@PathVariable Long materialId, @PathVariable int pageNumber) {
+        return ResponseEntity.ok().contentType(MediaType.IMAGE_PNG)
+                .body(materialService.pageImage(materialId, CurrentUser.id(), pageNumber));
     }
 
     @PostMapping("/materials/{materialId}/retry")

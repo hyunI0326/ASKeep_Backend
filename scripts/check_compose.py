@@ -8,7 +8,7 @@ root = Path(__file__).resolve().parents[1]
 config = json.loads(subprocess.check_output(
     ["docker", "compose", "--env-file", "/dev/null", "config", "--format", "json"],
     cwd=root,
-    env={**os.environ, "GEMINI_API_KEY": "config-check-only",
+    env={**os.environ, "OPENAI_API_KEY": "config-check-only",
          "JWT_SECRET": "config-check-secret-at-least-32-bytes", "DB_PASSWORD": "config-check-only"},
     text=True,
 ))

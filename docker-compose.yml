@@ -34,7 +34,7 @@ services:
       DB_NAME: askeep
       DB_USER: postgres
       DB_PASSWORD: ${DB_PASSWORD:-password}
-      GEMINI_API_KEY: ${GEMINI_API_KEY:?Set GEMINI_API_KEY in .env}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:?Set OPENAI_API_KEY in .env}
     depends_on:
       postgres:
         condition: service_healthy

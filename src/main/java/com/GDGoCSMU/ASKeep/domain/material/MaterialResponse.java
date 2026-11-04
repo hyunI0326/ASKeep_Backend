@@ -3,10 +3,11 @@ package com.GDGoCSMU.ASKeep.domain.material;
 import java.time.LocalDateTime;
 
 public record MaterialResponse(Long id, Long sessionId, String fileName, String contentType, Long fileSize,
-                              ProcessingStatus status, LocalDateTime createdAt, LocalDateTime updatedAt) {
+                              ProcessingStatus status, LocalDateTime createdAt, LocalDateTime updatedAt,
+                              Integer pageCount) {
     public static MaterialResponse from(Material material) {
         return new MaterialResponse(material.getId(), material.getSession().getId(), material.getFileName(),
                 material.getContentType(), material.getFileSize(), material.getStatus(),
-                material.getCreateAt(), material.getUpdateAt());
+                material.getCreateAt(), material.getUpdateAt(), material.getPageCount());
     }
 }

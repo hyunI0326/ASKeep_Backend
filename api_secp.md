@@ -195,6 +195,10 @@
   "sessionId": 1,
   "status": "COMPLETED",
   "summary": "JPA N+1 문제와 해결 방법을 다뤘습니다.",
+  "sections": [
+    { "title": "N+1 문제", "description": "연관 엔티티 조회 시 추가 쿼리가 발생하는 현상입니다." },
+    { "title": "해결 방법", "description": "fetch join으로 필요한 연관 데이터를 함께 조회합니다." }
+  ],
   "tags": ["JPA", "N+1"],
   "createdAt": "2026-10-01T10:30:00",
   "updatedAt": "2026-10-01T10:30:05"
@@ -204,6 +208,8 @@
 - 조회는 발표자·참여자만 가능합니다(아니면 403 `NOT_SESSION_PARTICIPANT`). 종료 전이라 요약이 없으면 404 `SUMMARY_NOT_FOUND`입니다.
 - 재시도는 발표자만(403 `NOT_SESSION_PRESENTER`), `FAILED` 상태에서만(409 `SUMMARY_RETRY_NOT_ALLOWED`) 가능합니다.
 - `tags`는 최대 10개, 각 30자 이내이며 `#`은 붙지 않습니다. 지식베이스 검색용 임베딩은 아직 없습니다(P2).
+- `sections`는 소제목(`title`) + 설명(`description`)의 순서 있는 목록입니다. 새 AI 요약은 1~20개이며 소제목은 200자, 설명은 5000자 이내입니다. 설명은 Markdown을 포함할 수 있습니다.
+- 기존 `summary` 문자열은 유지됩니다. 새 AI 서버는 목록을 Markdown 본문으로 합쳐 반환합니다. 생성 전에는 `sections: []`이고, 기능 추가 전 요약·이전 AI 서버 응답은 `{"title":"세션 요약","description":"기존 summary 내용"}` 한 항목으로 제공합니다.
 
 ### 내 세션 기록
 
@@ -233,6 +239,8 @@
 | 업로드 | `POST /sessions/{sessionId}/materials` | `multipart/form-data`: `file` | 202, `MaterialResponse` |
 | 목록 | `GET /sessions/{sessionId}/materials` | 선택 쿼리 `page`, `size` | 200, 페이지<`MaterialResponse`> |
 | 상세 | `GET /materials/{materialId}` | 없음 | 200, `MaterialResponse` |
+| 슬라이드 목록·페이지 수 | `GET /materials/{materialId}/pages` | 없음 | 200, `MaterialPagesResponse` |
+| 페이지 이미지 | `GET /materials/{materialId}/pages/{pageNumber}/image` | 없음 | 200, PNG 바이너리 |
 | 삭제 | `DELETE /materials/{materialId}` | 없음 | 200, 데이터 없음 |
 | AI 처리 재시도 | `POST /materials/{materialId}/retry` | 없음 | 202, `MaterialResponse` |
 
@@ -248,12 +256,52 @@
   "contentType": "application/pdf",
   "fileSize": 12345,
   "status": "PENDING",
+  "pageCount": null,
   "createdAt": "2026-10-01T10:30:00",
   "updatedAt": "2026-10-01T10:30:00"
 }
 ```
 
 `fileSize` 단위는 바이트입니다. `status` 값은 `PENDING`, `PROCESSING`, `COMPLETED`, `FAILED`입니다. 목록은 ID 내림차순입니다. 파일 다운로드 API는 구현되어 있지 않습니다.
+
+### 슬라이드 뷰어
+
+두 API 모두 `Authorization: Bearer {accessToken}`이 필요하며 해당 세션의 발표자·참여자만 사용할 수 있습니다.
+
+`GET /api/v1/materials/7/pages` 응답 예시:
+
+```json
+{
+  "success": true,
+  "data": {
+    "materialId": 7,
+    "pageCount": 2,
+    "pages": [
+      { "pageNumber": 1, "imageUrl": "/api/v1/materials/7/pages/1/image" },
+      { "pageNumber": 2, "imageUrl": "/api/v1/materials/7/pages/2/image" }
+    ]
+  }
+}
+```
+
+- 페이지 번호는 **1부터 시작**하고 빈 페이지도 전체 페이지 수에 포함됩니다. `imageUrl`은 Spring 서버 기준 상대 경로입니다.
+- 자료 상세·목록에도 `pageCount`가 추가됩니다. 아직 확인되지 않은 자료는 `null`이며, AI 처리 성공 또는 슬라이드 목록 첫 조회에서 확인해 DB에 저장합니다.
+- 기존 자료나 텍스트 추출 실패(`FAILED`) 자료도 원본 PDF가 남아 있으면 뷰어 조회가 가능합니다. 뷰어 API는 임베딩·OpenAI를 호출하지 않습니다.
+- 이미지 API의 성공 응답은 `{success,data}`가 아닌 **`Content-Type: image/png` 바이너리**입니다. 원본 비율을 유지하며 긴 변은 최대 1600px입니다.
+- `<img src="...">`에는 Bearer 헤더를 넣을 수 없으므로 `fetch`로 인증해 Blob URL을 만들고, 사용이 끝난 URL은 `URL.revokeObjectURL`로 해제하세요.
+
+```js
+const response = await fetch(`${SPRING_BASE_URL}/api/v1/materials/7/pages/1/image`, {
+  headers: { Authorization: `Bearer ${accessToken}` },
+});
+if (!response.ok) throw new Error(`슬라이드 조회 실패: ${response.status}`);
+const imageUrl = URL.createObjectURL(await response.blob());
+// <img src={imageUrl} />로 표시, 화면에서 제거할 때 URL.revokeObjectURL(imageUrl)
+```
+
+오류: 토큰 없음·유효하지 않음 401, 미참여자 403, 없는 자료·범위를 넘는 페이지 404, 0 이하 페이지 번호 400, 원본 PDF 유실 410, FastAPI 조회·변환 실패 502. 오류 본문은 기존 JSON 오류 형식입니다.
+
+이미지는 요청 시 Spring이 저장된 PDF를 FastAPI에 보내 한 페이지만 변환합니다. Spring의 PDF 저장 공간이 임시 디스크이면 재배포 시 원본이 사라질 수 있으므로 영구 저장 공간이 필요합니다.
 
 ## 5. 질문
 
@@ -299,8 +347,8 @@
 
 `author.username`에는 사용자의 `name` 값이 들어갑니다. REST에서 익명 질문의 작성자는 발표자와 본인에게만 보이고, 다른 참여자에게는 `author:null`입니다. `mine`은 익명 여부와 무관하게 본인 질문이면 `true`입니다. `aiStatus` 값은 `PENDING`, `PROCESSING`, `COMPLETED`, `NO_EVIDENCE`, `FAILED`입니다.
 
-- AI 서버는 검색 상위 5개 조각 중 cosine similarity가 **0.8 이상**인 조각만 답변에 사용합니다. 자료가 없거나 기준을 넘는 조각이 없으면 Gemini 호출을 생략합니다.
-- `NO_EVIDENCE`는 처리 오류가 아닌 정상적인 근거 부족 결과입니다. 이 경우 AI 답변 행은 추가하지 않으며, 기존 발표자 답변은 유지합니다. DB·임베딩·Gemini 호출 오류는 `FAILED`입니다.
+- AI 서버는 검색 상위 5개 조각 중 cosine similarity가 **0.8 이상**인 조각만 답변에 사용합니다. 자료가 없거나 기준을 넘는 조각이 없으면 OpenAI 호출을 생략합니다.
+- `NO_EVIDENCE`는 처리 오류가 아닌 정상적인 근거 부족 결과입니다. 이 경우 AI 답변 행은 추가하지 않으며, 기존 발표자 답변은 유지합니다. DB·임베딩·OpenAI 호출 오류는 `FAILED`입니다.
 - `QUESTION_UPDATED`에도 `aiStatus: NO_EVIDENCE`가 전달됩니다. 프론트는 ‘자료에 근거 없음’ 상태를 표시해야 합니다.
 - 새 자료 업로드·처리 후 발표자가 `NO_EVIDENCE` 질문의 AI 답변을 재시도할 수 있습니다.
 

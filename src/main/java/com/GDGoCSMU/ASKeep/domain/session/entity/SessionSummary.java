@@ -35,6 +35,11 @@ public class SessionSummary extends BaseEntity {
     @Column(columnDefinition = "TEXT")
     private List<String> tags = new ArrayList<>();
 
+    @ElementCollection
+    @CollectionTable(name = "session_summary_sections", joinColumns = @JoinColumn(name = "summary_id"))
+    @OrderColumn(name = "section_index")
+    private List<SummarySection> sections = new ArrayList<>();
+
     protected SessionSummary() {
     }
 
@@ -50,9 +55,10 @@ public class SessionSummary extends BaseEntity {
         return true;
     }
 
-    public void complete(String summary, List<String> tags) {
+    public void complete(String summary, List<String> tags, List<SummarySection> sections) {
         this.summary = summary;
         this.tags = new ArrayList<>(tags);
+        this.sections = new ArrayList<>(sections);
         this.status = SummaryStatus.COMPLETED;
     }
 
@@ -72,4 +78,5 @@ public class SessionSummary extends BaseEntity {
     public SummaryStatus getStatus() { return status; }
     public String getSummary() { return summary; }
     public List<String> getTags() { return tags; }
+    public List<SummarySection> getSections() { return sections; }
 }

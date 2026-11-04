@@ -3,6 +3,7 @@ package com.GDGoCSMU.ASKeep.domain.material;
 import com.GDGoCSMU.ASKeep.domain.material.client.AiClientServer;
 import com.GDGoCSMU.ASKeep.domain.material.dto.AiDocumentRequest;
 import com.GDGoCSMU.ASKeep.domain.material.dto.AiDocumentResponse;
+import com.GDGoCSMU.ASKeep.domain.material.dto.MaterialPagesResponse;
 import com.GDGoCSMU.ASKeep.domain.session.SessionAccessService;
 import com.GDGoCSMU.ASKeep.domain.session.entity.Session;
 import jakarta.persistence.EntityNotFoundException;
@@ -12,6 +13,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.server.ResponseStatusException;
+import org.springframework.web.client.RestClientException;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -72,6 +74,46 @@ public class MaterialService {
         return materialRepository.findBySession_IdOrderByIdDesc(sessionId, pageable);
     }
 
+    public MaterialPagesResponse pages(Long id, Long userId) {
+        Material material = get(id, userId);
+        return MaterialPagesResponse.of(id, pageCount(material));
+    }
+
+    private int pageCount(Material material) {
+        if (material.getPageCount() == null) {
+            requirePdf(material);
+            try {
+                Integer count = aiClientServer.pageCount(material.getFilePath());
+                if (count == null || count < 1) throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "PDF 페이지 수가 올바르지 않습니다.");
+                material.setPageCount(count);
+                materialRepository.save(material);
+            } catch (RestClientException exception) {
+                throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "PDF 페이지 정보를 가져오지 못했습니다.", exception);
+            }
+        }
+        return material.getPageCount();
+    }
+
+    public byte[] pageImage(Long id, Long userId, int pageNumber) {
+        Material material = get(id, userId);
+        if (pageNumber < 1) throw new IllegalArgumentException("pageNumber는 1 이상이어야 합니다.");
+        if (pageNumber > pageCount(material)) throw new EntityNotFoundException("페이지를 찾을 수 없습니다.");
+        requirePdf(material);
+        try {
+            byte[] image = aiClientServer.renderPage(material.getFilePath(), pageNumber);
+            if (image == null || image.length == 0) throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "페이지 이미지가 비어 있습니다.");
+            return image;
+        } catch (RestClientException exception) {
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "페이지 이미지를 가져오지 못했습니다.", exception);
+        }
+    }
+
+    private void requirePdf(Material material) {
+        if (!Files.isRegularFile(Path.of(material.getFilePath()))) {
+            throw new ResponseStatusException(HttpStatus.GONE, "원본 PDF가 없습니다. 자료를 다시 업로드하세요.");
+        }
+    }
+
     public void delete(Long id, Long userId) {
         Material material = find(id);
         sessionAccess.requireHost(material.getSession().getId(), userId);
@@ -113,7 +155,10 @@ public class MaterialService {
             try {
                 AiDocumentResponse response = aiClientServer.processDocument(
                         new AiDocumentRequest(id, sessionId, filePath));
-                if (response != null && "success".equalsIgnoreCase(response.status())) material.completeProcessing();
+                if (response != null && "success".equalsIgnoreCase(response.status())) {
+                    if (response.pageCount() != null && response.pageCount() > 0) material.setPageCount(response.pageCount());
+                    material.completeProcessing();
+                }
                 else material.failProcessing();
             } catch (Exception exception) {
                 material.failProcessing();

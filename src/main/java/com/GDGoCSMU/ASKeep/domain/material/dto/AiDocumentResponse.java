@@ -1,4 +1,4 @@
 package com.GDGoCSMU.ASKeep.domain.material.dto;
 
-public record AiDocumentResponse(Long materialId, String status, Integer chunkCount) {
+public record AiDocumentResponse(Long materialId, String status, Integer chunkCount, Integer pageCount) {
 }

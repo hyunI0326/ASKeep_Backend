@@ -30,7 +30,7 @@ class AiDocumentUploadTest {
         server.createContext("/documents/process", exchange -> {
             contentType.set(exchange.getRequestHeaders().getFirst("Content-Type"));
             body.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.ISO_8859_1));
-            byte[] response = "{\"materialId\":7,\"status\":\"success\",\"chunkCount\":2}".getBytes(StandardCharsets.UTF_8);
+            byte[] response = "{\"materialId\":7,\"status\":\"success\",\"chunkCount\":2,\"pageCount\":2}".getBytes(StandardCharsets.UTF_8);
             exchange.getResponseHeaders().add("Content-Type", "application/json");
             exchange.sendResponseHeaders(fails.get() ? 500 : 200, response.length);
             try (var output = exchange.getResponseBody()) {
@@ -46,6 +46,7 @@ class AiDocumentUploadTest {
             var response = client.processDocument(request);
             assertEquals("success", response.status());
             assertEquals(2, response.chunkCount());
+            assertEquals(2, response.pageCount());
             assertTrue(contentType.get().startsWith("multipart/form-data;boundary="));
             assertTrue(body.get().contains("name=\"materialId\""));
             assertTrue(body.get().contains("\r\n\r\n7\r\n"));

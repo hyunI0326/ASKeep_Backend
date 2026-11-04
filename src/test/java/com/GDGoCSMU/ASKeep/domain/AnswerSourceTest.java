@@ -1,5 +1,6 @@
 package com.GDGoCSMU.ASKeep.domain;
 
+import com.GDGoCSMU.ASKeep.domain.material.MaterialRepository;
 import com.jayway.jsonpath.JsonPath;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterAll;
@@ -18,14 +19,19 @@ import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 /**
  * AI 답변 출처 테스트.
@@ -43,6 +49,10 @@ class AnswerSourceTest {
 
     /** 가짜 AI 서버가 출처로 돌려줄 자료 번호 (테스트에서 업로드한 자료) */
     static final AtomicLong sourceMaterialId = new AtomicLong();
+    static final AtomicBoolean imageFails = new AtomicBoolean();
+    static final AtomicInteger pageCountCalls = new AtomicInteger();
+    static final AtomicReference<String> renderRequest = new AtomicReference<>();
+    static final byte[] PNG = Base64.getDecoder().decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jx1kAAAAASUVORK5CYII=");
     static final HttpServer fakeAi = startFakeAi();
     static final String uploadDir = tempDir();
 
@@ -59,6 +69,74 @@ class AnswerSourceTest {
 
     @Autowired
     MockMvc mvc;
+
+    @Autowired
+    MaterialRepository materialRepository;
+
+    @Test
+    void 슬라이드_페이지_조회는_참여자만_가능하고_기존_자료도_지원한다() throws Exception {
+        String presenter = signupAndLogin();
+        String audience = signupAndLogin();
+        String stranger = signupAndLogin();
+        long sessionId = createSession(presenter);
+        long materialId = uploadPdf(presenter, sessionId, "slides.pdf");
+        join(audience, sessionId, presenter);
+        String base = "/api/v1/materials/" + materialId;
+        boolean completed = false;
+        for (int i = 0; i < 50; i++) {
+            var material = materialRepository.findById(materialId).orElseThrow();
+            if (material.getStatus().name().equals("COMPLETED")) {
+                assertEquals(5, material.getPageCount());
+                completed = true;
+                break;
+            }
+            Thread.sleep(100);
+        }
+        assertTrue(completed, "자료 처리가 완료돼야 합니다.");
+        mvc.perform(get(base).header("Authorization", "Bearer " + presenter))
+                .andExpect(jsonPath("$.data.pageCount").value(5));
+        mvc.perform(get(base + "/pages").header("Authorization", "Bearer " + audience))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.pageCount").value(5))
+                .andExpect(jsonPath("$.data.pages.length()").value(5))
+                .andExpect(jsonPath("$.data.pages[0].pageNumber").value(1))
+                .andExpect(jsonPath("$.data.pages[4].imageUrl").value(base + "/pages/5/image"));
+        mvc.perform(get(base + "/pages/2/image").header("Authorization", "Bearer " + audience))
+                .andExpect(status().isOk()).andExpect(content().contentType(MediaType.IMAGE_PNG))
+                .andExpect(content().bytes(PNG));
+        assertTrue(renderRequest.get().contains("name=\"pageNumber\""));
+        assertTrue(renderRequest.get().contains("\r\n\r\n2\r\n"));
+        assertTrue(renderRequest.get().contains("%PDF-1.7"));
+        for (String route : List.of("/pages", "/pages/1/image")) {
+            mvc.perform(get(base + route)).andExpect(status().isUnauthorized());
+            mvc.perform(get(base + route).header("Authorization", "Bearer " + stranger)).andExpect(status().isForbidden());
+        }
+        mvc.perform(get(base + "/pages/0/image").header("Authorization", "Bearer " + audience)).andExpect(status().isBadRequest());
+        mvc.perform(get(base + "/pages/6/image").header("Authorization", "Bearer " + audience)).andExpect(status().isNotFound());
+        imageFails.set(true);
+        try {
+            mvc.perform(get(base + "/pages/1/image").header("Authorization", "Bearer " + presenter))
+                    .andExpect(status().isBadGateway());
+        } finally {
+            imageFails.set(false);
+        }
+        // 페이지 수가 없는 기존 자료·텍스트 분석 실패 자료도 원본 PDF로 조회한다.
+        var legacy = materialRepository.findById(materialId).orElseThrow();
+        legacy.setPageCount(null);
+        legacy.failProcessing();
+        materialRepository.save(legacy);
+        int calls = pageCountCalls.get();
+        for (int i = 0; i < 2; i++) {
+            mvc.perform(get(base + "/pages").header("Authorization", "Bearer " + presenter))
+                    .andExpect(status().isOk()).andExpect(jsonPath("$.data.pageCount").value(5));
+        }
+        assertEquals(calls + 1, pageCountCalls.get(), "페이지 수는 저장 후 재사용해야 합니다.");
+        mvc.perform(get(base + "/pages/1/image").header("Authorization", "Bearer " + presenter)).andExpect(status().isOk());
+        Files.delete(Path.of(legacy.getFilePath()));
+        mvc.perform(get(base + "/pages/1/image").header("Authorization", "Bearer " + presenter)).andExpect(status().isGone());
+        mvc.perform(delete(base).header("Authorization", "Bearer " + presenter)).andExpect(status().isOk());
+        mvc.perform(get(base + "/pages").header("Authorization", "Bearer " + presenter)).andExpect(status().isNotFound());
+    }
 
     @Test
     void AI_답변에_참고한_자료와_페이지가_출처로_붙는다() throws Exception {
@@ -181,7 +259,23 @@ class AnswerSourceTest {
             HttpServer server = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
             server.createContext("/documents/process", exchange -> {
                 exchange.getRequestBody().readAllBytes();
-                respond(exchange, 200, "{\"materialId\":1,\"status\":\"success\",\"chunkCount\":3}");
+                respond(exchange, 200, "{\"materialId\":1,\"status\":\"success\",\"chunkCount\":3,\"pageCount\":5}");
+            });
+            server.createContext("/documents/page-count", exchange -> {
+                exchange.getRequestBody().readAllBytes();
+                pageCountCalls.incrementAndGet();
+                respond(exchange, 200, "{\"pageCount\":5}");
+            });
+            server.createContext("/documents/render-page", exchange -> {
+                renderRequest.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+                if (imageFails.get()) {
+                    respond(exchange, 500, "{\"detail\":\"render failed\"}");
+                    return;
+                }
+                exchange.getResponseHeaders().add("Content-Type", "image/png");
+                exchange.sendResponseHeaders(200, PNG.length);
+                try (OutputStream out = exchange.getResponseBody()) { out.write(PNG); }
+                exchange.close();
             });
             server.createContext("/ai/answer", exchange -> {
                 exchange.getRequestBody().readAllBytes();

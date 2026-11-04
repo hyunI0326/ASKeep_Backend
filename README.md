@@ -8,7 +8,7 @@ Docker Compose로 Spring Boot, FastAPI, PostgreSQL을 한 서버에서 실행합
 test -f .env || cp .env.example .env
 ```
 
-`.env`에 `GEMINI_API_KEY`와 `JWT_SECRET`을 입력하세요. `JWT_SECRET`은
+`.env`에 `OPENAI_API_KEY`와 `JWT_SECRET`을 입력하세요. `JWT_SECRET`은
 `openssl rand -hex 32`로 생성할 수 있습니다. `DB_PASSWORD`는 세 서비스에
 동일하게 적용됩니다. 기존 DB 볼륨이 있으면 생성 당시 비밀번호를 유지해야 합니다.
 배포 시 `CORS_ALLOWED_ORIGINS`에 실제 프론트 주소를 지정하세요.
@@ -35,7 +35,7 @@ docker compose exec -T postgres psql -U postgres -d askeep -v ON_ERROR_STOP=1 < 
 
 로그인 → 세션 생성 → PDF 업로드 및 `COMPLETED` 확인 → 세션 시작 → 질문 등록 →
 AI 답변 확인 → 세션 종료 → 요약 조회 순서로 실제 연동을 확인합니다.
-`/health`만으로 Gemini 호출이나 DB 저장 성공을 확인할 수는 없습니다.
+`/health`만으로 OpenAI 호출이나 DB 저장 성공을 확인할 수는 없습니다.
 기존 로컬 개발에서 저장한 자료의 절대경로는 새 컨테이너 경로와 다르므로, 검증용 PDF는 새로 업로드하세요.
 
 설정 검증(실제 키나 Docker 데몬 불필요): `python3 scripts/check_compose.py`
@@ -45,7 +45,7 @@ AI 답변 확인 → 세션 종료 → 요약 조회 순서로 실제 연동을 
 FastAPI 서비스는 Root Directory `ai-server`, Dockerfile Path `./Dockerfile`로 배포합니다.
 Spring의 `AI_SERVER_BASE_URL`에는 실제 FastAPI 서비스 주소를 설정하고,
 FastAPI의 `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`는 Spring과 같은 DB를 가리키게 설정합니다.
-`GEMINI_API_KEY`는 FastAPI 서비스에 설정합니다. AI API에는 별도 인증이 없으므로 같은 Render 워크스페이스와 지역의 Private Service로 연결합니다.
+`OPENAI_API_KEY`는 FastAPI 서비스에 설정합니다. AI API에는 별도 인증이 없으므로 같은 Render 워크스페이스와 지역의 Private Service로 연결합니다.
 
 자료 처리는 `POST /documents/process`에 multipart 필드 `materialId`, `sessionId`, `file`을 보냅니다.
 JSON `filePath` 요청은 더 이상 받지 않습니다. Spring과 FastAPI를 모두 새 코드로 빌드·배포해야 합니다.
@@ -55,13 +55,13 @@ Spring에는 재시도용 원본 PDF가 필요하므로, 재시작 후에도 재
 임베딩은 PyTorch 대신 ONNX Runtime과 SentencePiece로 같은 multilingual-e5-small의 INT8 파일을 실행합니다.
 384차원, mean pooling, 정규화와 `passage:`/`query:` 접두사를 유지합니다.
 512MiB 환경을 위해 임베딩을 한 번에 한 문서씩 순차 처리합니다.
-로컬 메모리 회귀 확인: `GEMINI_API_KEY=memory-check-not-a-real-key ai-server/.venv/bin/python ai-server/check_embedding_memory.py`
+로컬 메모리 회귀 확인: `OPENAI_API_KEY=memory-check-not-a-real-key ai-server/.venv/bin/python ai-server/check_embedding_memory.py`
 이 검사는 시작 및 샘플 임베딩의 최대 RSS가 512MiB 미만인지 확인하며, Render Linux에서의 실측은 별도로 확인해야 합니다.
 
 ## AI 답변 근거 판단
 
-AI 서버에서 검색 상위 5개 조각 중 similarity **0.8 이상**인 조각만 Gemini에 전달합니다.
-해당 조각이 없으면 Gemini 호출 없이 HTTP 200의 JSON `{ sessionId, question, status: "NO_EVIDENCE", answer, sources: [] }`를 반환합니다.
+AI 서버에서 검색 상위 5개 조각 중 similarity **0.8 이상**인 조각만 OPENAI에 전달합니다.
+해당 조각이 없으면 OPENAI 호출 없이 HTTP 200의 JSON `{ sessionId, question, status: "NO_EVIDENCE", answer, sources: [] }`를 반환합니다.
 답변 생성 시 같은 구조에 `status: "COMPLETED"`와 실제 출처를 반환합니다. `/search`는 점수 확인용으로 원래 검색 결과를 유지합니다.
 Spring은 `NO_EVIDENCE`를 질문의 `aiStatus`에 저장하고 `QUESTION_UPDATED`로 알립니다. 근거 부족 안내를 AI 답변 행으로 저장하지 않습니다.
 새 PDF 처리 후 발표자가 `FAILED` 또는 `NO_EVIDENCE` 상태의 질문을 재시도할 수 있습니다.
@@ -150,7 +150,7 @@ Spring 재배포가 필요합니다. 운영 DB 스키마를 수동 관리한다�
 
   ==============================
 
--`ai-server/main.py`에 `POST /sessions/summary`를 추가했습니다. 기존 `/ai/answer`와 같은 방식(Gemini, 503 재시도)이고 JSON으로 `{ sessionId, summary, tags }`를 돌려줍니다.
+-`ai-server/main.py`에 `POST /sessions/summary`를 추가했습니다. 기존 `/ai/answer`와 같은 방식(OPENAI, 503 재시도)이고 JSON으로 `{ sessionId, summary, tags }`를 돌려줍니다.
 - 로컬에 Python이 없어 직접 실행해 보지 못했습니다. 한번 실행해서 확인 부탁드립니다. (Spring 쪽은 가짜 AI 서버로 테스트 완료)
 - `AiClientServer`에 `summarize()` 메서드를 추가했습니다.
 
@@ -340,3 +340,11 @@ AI 서버가 이미 보내주던 출처(어느 자료의 몇 페이지를 참고
 ```
 .\gradlew.bat test --tests "com.GDGoCSMU.ASKeep.domain.AnswerSourceTest"
 ```
+# 슬라이드 뷰어·구조화 요약 추가
+
+- `GET /api/v1/materials/{materialId}/pages`: 전체 페이지 수와 페이지별 이미지 API 주소.
+- `GET /api/v1/materials/{materialId}/pages/{pageNumber}/image`: 인증된 발표자·참여자에게 PNG 반환(페이지 번호 1부터).
+- 자료 응답에 `pageCount`, 세션 요약 응답에 `sections: [{title, description}]` 추가. 기존 summary 문자열은 유지합니다.
+- Spring과 FastAPI를 모두 재배포해야 합니다. 현재 `spring.jpa.hibernate.ddl-auto=update`에서는 새 컬럼·테이블을 자동 생성합니다. 스키마를 수동 관리하면 `db/material-pages-summary-sections.sql`을 적용하세요.
+- 원본 PDF는 기존 Spring 업로드 폴더를 사용합니다. 영구 디스크가 없는 배포 환경에서 파일이 사라지면 이미지 API는 410을 반환하고 재업로드가 필요합니다.
+- 전체 요청·응답과 프론트 이미지 표시 예시는 `api_secp.md`의 슬라이드 뷰어 항목을 참고하세요.

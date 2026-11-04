@@ -9,4 +9,4 @@ sentencepiece
 huggingface-hub
 numpy
 python-dotenv
-google-genai
+openai
