@@ -228,10 +228,16 @@ public class QuestionService {
             try {
                 AiAnswerResponse result = aiClientServer.answer(new AiAnswerRequest(sessionId, content));
                 if (result == null || result.answer() == null || result.answer().isBlank()) throw new IllegalStateException("AI 답변이 비어 있습니다.");
-                                Answer aiAnswer = Answer.builder().content(result.answer()).type(AnswerType.AI).question(question).author(null).build();
-                addSources(aiAnswer, result.sources());
-                answerRepository.save(aiAnswer);
-                questionRepository.updateAiStatus(questionId, AiStatus.COMPLETED, LocalDateTime.now());
+                if (result.status() == AiStatus.NO_EVIDENCE) {
+                    questionRepository.updateAiStatus(questionId, AiStatus.NO_EVIDENCE, LocalDateTime.now());
+                } else if (result.status() == AiStatus.COMPLETED) {
+                    Answer aiAnswer = Answer.builder().content(result.answer()).type(AnswerType.AI).question(question).author(null).build();
+                    addSources(aiAnswer, result.sources());
+                    answerRepository.save(aiAnswer);
+                    questionRepository.updateAiStatus(questionId, AiStatus.COMPLETED, LocalDateTime.now());
+                } else {
+                    throw new IllegalStateException("AI 응답 상태가 올바르지 않습니다.");
+                }
             } catch (Exception exception) {
                 log.warn("AI 답변 생성 실패 questionId={}", questionId, exception);
                 questionRepository.updateAiStatus(questionId, AiStatus.FAILED, LocalDateTime.now());

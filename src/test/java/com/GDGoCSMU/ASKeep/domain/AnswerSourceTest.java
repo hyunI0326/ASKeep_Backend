@@ -281,7 +281,7 @@ class AnswerSourceTest {
                 exchange.getRequestBody().readAllBytes();
                 long id = sourceMaterialId.get();
                 respond(exchange, 200, """
-                        {"sessionId":1,"question":"q","answer":"Pod는 컨테이너 묶음입니다.","sources":[
+                        {"sessionId":1,"question":"q","status":"COMPLETED","answer":"Pod는 컨테이너 묶음입니다.","sources":[
                           {"chunkId":11,"materialId":%d,"chunkIndex":0,"pageNumber":3,"similarity":0.75},
                           {"chunkId":12,"materialId":%d,"chunkIndex":1,"pageNumber":3,"similarity":0.82},
                           {"chunkId":13,"materialId":%d,"chunkIndex":4,"pageNumber":5,"similarity":0.61}
