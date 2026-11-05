@@ -1,0 +1,61 @@
+name: ASKeep CI
+
+on:
+  pull_request:
+    branches: [develop]
+  push:
+    branches: [develop]
+
+permissions:
+  contents: read
+
+jobs:
+  spring-test:
+    name: Spring 테스트
+    runs-on: ubuntu-latest
+
+    # 기본 contextLoads 테스트도 실제 DB 대신 테스트 DB를 사용
+    env:
+      DB_URL: "jdbc:h2:mem:askeep-ci;MODE=PostgreSQL;DB_CLOSE_DELAY=-1"
+      DB_USER: sa
+      DB_PASSWORD: ""
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Java 21 설정
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: gradle
+
+      - name: Gradle 테스트
+        run: |
+          chmod +x gradlew
+          ./gradlew test --no-daemon
+
+  ai-test:
+    name: AI 서버 테스트
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Python 3.13 설정
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: 의존성 설치
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r ai-server/requirements.txt
+          python -m pip install httpx httpx2
+
+      - name: AI 서버 테스트
+        working-directory: ai-server
+        run: python -m unittest test_document_upload
+
+      - name: Compose 설정 검사
+        run: python scripts/check_compose.py
