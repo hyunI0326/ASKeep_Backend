@@ -37,6 +37,11 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         if (token != null && !tokenBlacklist.contains(token)) {
             try {
                 Claims claims = jwtProvider.parse(token);
+                if (tokenBlacklist.isRevoked(claims)) {
+                    // 비밀번호 변경·탈퇴 이전에 발급된 토큰
+                    chain.doFilter(request, response);
+                    return;
+                }
                 Long userId = Long.valueOf(claims.getSubject());
                 String role = claims.get("role", String.class);
                 LoginUser principal = new LoginUser(userId, role);

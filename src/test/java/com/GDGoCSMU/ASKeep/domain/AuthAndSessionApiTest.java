@@ -34,7 +34,7 @@ class AuthAndSessionApiTest {
         String email = UUID.randomUUID() + "@test.com";
         mvc.perform(post("/api/v1/users/auth/signup").contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"email":"%s","password":"password123","name":"%s"}""".formatted(email, name)))
+                                {"email":"%s","password":"password123","name":"%s","department":"컴퓨터과학과"}""".formatted(email, name)))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.success").value(true))
                 .andExpect(jsonPath("$.data.email").value(email))
@@ -72,7 +72,7 @@ class AuthAndSessionApiTest {
     void 중복이메일_잘못된비밀번호_토큰없음() throws Exception {
         String email = UUID.randomUUID() + "@test.com";
         String signup = """
-                {"email":"%s","password":"password123","name":"a"}""".formatted(email);
+                {"email":"%s","password":"password123","name":"a","department":"컴퓨터과학과"}""".formatted(email);
         mvc.perform(post("/api/v1/users/auth/signup").contentType(MediaType.APPLICATION_JSON).content(signup))
                 .andExpect(status().isCreated());
         mvc.perform(post("/api/v1/users/auth/signup").contentType(MediaType.APPLICATION_JSON).content(signup))

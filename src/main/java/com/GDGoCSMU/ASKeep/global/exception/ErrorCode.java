@@ -16,6 +16,15 @@ public enum ErrorCode {
     LOGIN_FAILED(HttpStatus.UNAUTHORIZED, "이메일 또는 비밀번호가 올바르지 않습니다."),
     INVALID_TOKEN(HttpStatus.UNAUTHORIZED, "유효하지 않은 토큰입니다."),
     USER_NOT_FOUND(HttpStatus.NOT_FOUND, "사용자를 찾을 수 없습니다."),
+    DUPLICATE_NAME(HttpStatus.CONFLICT, "이미 사용 중인 이름입니다."),
+    RESERVED_NAME(HttpStatus.BAD_REQUEST, "사용할 수 없는 이름입니다."),
+    // 401을 쓰면 프론트가 로그아웃 처리할 수 있어서, 로그인 상태에서 비밀번호를 틀린 경우는 400으로 준다
+    INVALID_PASSWORD(HttpStatus.BAD_REQUEST, "현재 비밀번호가 올바르지 않습니다."),
+    SAME_PASSWORD(HttpStatus.BAD_REQUEST, "새 비밀번호가 현재 비밀번호와 같습니다."),
+    EMPTY_PROFILE_UPDATE(HttpStatus.BAD_REQUEST, "변경할 항목이 없습니다."),
+    HOSTING_LIVE_SESSION(HttpStatus.CONFLICT, "진행 중인 세션을 먼저 종료한 뒤 탈퇴할 수 있습니다."),
+    INVALID_RESET_CODE(HttpStatus.BAD_REQUEST, "인증코드가 올바르지 않거나 만료되었습니다."),
+    MAIL_SEND_FAILED(HttpStatus.SERVICE_UNAVAILABLE, "메일을 보내지 못했습니다. 잠시 후 다시 시도해 주세요."),
 
     // 세션
     SESSION_NOT_FOUND(HttpStatus.NOT_FOUND, "세션을 찾을 수 없습니다."),

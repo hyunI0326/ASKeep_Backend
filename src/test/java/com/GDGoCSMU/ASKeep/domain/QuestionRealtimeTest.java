@@ -442,7 +442,7 @@ class QuestionRealtimeTest {
         String email = UUID.randomUUID() + "@test.com";
         String name = "q-" + UUID.randomUUID().toString().substring(0, 8);
         post("/api/v1/users/auth/signup", null,
-                "{\"email\":\"%s\",\"password\":\"password123\",\"name\":\"%s\"}".formatted(email, name));
+                "{\"email\":\"%s\",\"password\":\"password123\",\"name\":\"%s\",\"department\":\"컴퓨터과학과\"}".formatted(email, name));
         String body = post("/api/v1/users/auth/login", null,
                 "{\"email\":\"%s\",\"password\":\"password123\"}".formatted(email));
         return JsonPath.read(body, "$.data.accessToken");

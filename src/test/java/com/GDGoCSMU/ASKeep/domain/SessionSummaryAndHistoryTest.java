@@ -211,7 +211,7 @@ class SessionSummaryAndHistoryTest {
         String email = UUID.randomUUID() + "@test.com";
         String name = "sum-" + UUID.randomUUID().toString().substring(0, 8);
         mvc.perform(post("/api/v1/users/auth/signup").contentType(MediaType.APPLICATION_JSON)
-                .content("{\"email\":\"%s\",\"password\":\"password123\",\"name\":\"%s\"}".formatted(email, name)))
+                .content("{\"email\":\"%s\",\"password\":\"password123\",\"name\":\"%s\",\"department\":\"컴퓨터과학과\"}".formatted(email, name)))
                 .andExpect(status().isCreated());
         String body = mvc.perform(post("/api/v1/users/auth/login").contentType(MediaType.APPLICATION_JSON)
                         .content("{\"email\":\"%s\",\"password\":\"password123\"}".formatted(email)))
