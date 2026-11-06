@@ -7,6 +7,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
@@ -29,6 +30,9 @@ public interface SessionRepository extends JpaRepository<Session, Long> {
     /** 내가 만든 세션 */
     @EntityGraph(attributePaths = "presenter")
     List<Session> findAllByPresenter_IdOrderByCreatedAtDesc(Long presenterId);
+
+    /** 회원 탈퇴 전 진행 중인 세션이 있는지 확인할 때 쓴다 */
+    boolean existsByPresenter_IdAndStatusIn(Long presenterId, Collection<SessionStatus> statuses);
 
     /** 내가 참여한 세션 */
     @Query("""

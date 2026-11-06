@@ -125,6 +125,14 @@ Spring 재배포가 필요합니다. 운영 DB 스키마를 수동 관리한다�
 | 세션 요약 재시도 | `POST /api/v1/sessions/{sessionId}/summary/retry` | 발표자 (FAILED일 때만) | 202 |
 | 내 세션 기록 | `GET /api/v1/users/me/sessions?role=PRESENTER\|AUDIENCE` | 로그인 | 200 |
 | ~~세션 ID로 참여~~ | ~~`POST /api/v1/sessions/{sessionId}/participants`~~ | **삭제됨** | |
+| 회원가입 (학과 추가) | `POST /api/v1/users/auth/signup` 에 `department` 필수 추가 | 누구나 | 201 |
+| 이름·학과 변경 | `PATCH /api/v1/users/me` `{"name","department"}` (보낸 필드만) | 로그인 | 200 |
+| 비밀번호 변경 | `PATCH /api/v1/users/me/password` `{"currentPassword","newPassword"}` | 로그인 | 200 (새 토큰) |
+| 회원 탈퇴 | `DELETE /api/v1/users/me` `{"password"}` | 로그인 | 200 |
+| 비밀번호 재설정 코드 요청 | `POST /api/v1/users/auth/password-reset/request` `{"email"}` | 누구나 | 200 |
+| 비밀번호 재설정 | `POST /api/v1/users/auth/password-reset/confirm` `{"email","code","newPassword"}` | 누구나 | 200 |
+
+비밀번호 변경·재설정·탈퇴 시 그 사용자의 기존 토큰은 모든 기기에서 무효가 됩니다. 재설정 메일은 `.env`의 `MAIL_*`(SMTP)를 쓰고, 비워 두면 backend 로그에 인증코드가 출력됩니다.
 
 자세한 요청·응답 형식과 에러 코드는 `api_secp.md`에 반영했습니다.
 노션과 다른 점이 있거나 수정사항이 있다면 알려주시면 감사하겠습니다

@@ -77,6 +77,9 @@ public class StompAuthChannelInterceptor implements ChannelInterceptor {
         }
         try {
             Claims claims = jwtProvider.parse(token);
+            if (tokenBlacklist.isRevoked(claims)) {
+                throw new MessageDeliveryException("유효하지 않은 토큰입니다.");
+            }
             LoginUser user = new LoginUser(Long.valueOf(claims.getSubject()), claims.get("role", String.class));
             return new UsernamePasswordAuthenticationToken(user, null,
                     List.of(new SimpleGrantedAuthority("ROLE_" + user.role())));
