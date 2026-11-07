@@ -78,6 +78,11 @@
 | 로그인 | `POST /users/auth/login` | `LoginRequest` | 200, `LoginResponse` |
 | 로그아웃 | `POST /users/auth/logout` | 없음 | 200, 데이터 없음 |
 | 내 정보 | `GET /users/me` | 없음 | 200, `UserResponse` |
+| 이름·학과 변경 | `PATCH /users/me` | `UpdateProfileRequest` | 200, `UserResponse` |
+| 비밀번호 변경 | `PATCH /users/me/password` | `ChangePasswordRequest` | 200, `LoginResponse`(새 토큰) |
+| 회원 탈퇴 | `DELETE /users/me` | `{"password":"..."}` | 200, 데이터 없음 |
+| 비밀번호 재설정 코드 요청 | `POST /users/auth/password-reset/request` | `{"email":"..."}` | 200, 데이터 없음 (로그인 불필요) |
+| 비밀번호 재설정 | `POST /users/auth/password-reset/confirm` | `PasswordResetConfirmRequest` | 200, 데이터 없음 (로그인 불필요) |
 
 `SignupRequest`:
 
@@ -85,11 +90,12 @@
 {
   "email": "alice@example.com",
   "password": "password123",
-  "name": "앨리스"
+  "name": "앨리스",
+  "department": "컴퓨터과학과"
 }
 ```
 
-`email`은 필수·이메일 형식·최대 100자, `password`는 필수·8~64자, `name`은 필수·최대 30자입니다. 이메일은 앞뒤 공백을 제거하고 소문자로 저장합니다. 비밀번호는 응답에 포함하지 않습니다. 중복 이메일은 `409 DUPLICATE_EMAIL`입니다.
+`email`은 필수·이메일 형식·최대 100자, `password`는 필수·8~64자, `name`은 필수·최대 30자, `department`(학과)는 필수·최대 50자입니다. 이메일은 앞뒤 공백을 제거하고 소문자로 저장합니다. 비밀번호는 응답에 포함하지 않습니다. 중복 이메일은 `409 DUPLICATE_EMAIL`, 이미 쓰는 이름은 `409 DUPLICATE_NAME`, `탈퇴한 사용자#`으로 시작하는 이름은 `400 RESERVED_NAME`입니다.
 
 `LoginRequest`: `{"email":"alice@example.com","password":"password123"}`. 잘못된 이메일 또는 비밀번호는 `401 LOGIN_FAILED`입니다.
 
@@ -100,10 +106,13 @@
   "userId": 1,
   "email": "alice@example.com",
   "name": "앨리스",
+  "department": "컴퓨터과학과",
   "role": "USER",
   "createdAt": "2026-10-01T10:30:00"
 }
 ```
+
+`department`는 학과 필드가 생기기 전에 가입한 회원이면 `null`일 수 있습니다.
 
 `LoginResponse`(`data`):
 
@@ -123,6 +132,21 @@
 ```
 
 `expiresIn`의 단위는 초입니다. 로그아웃한 토큰은 만료될 때까지 서버 메모리에서 차단합니다. 서버가 재시작되면 이 차단 목록은 초기화됩니다.
+
+### 내 정보 수정·비밀번호·탈퇴
+
+`UpdateProfileRequest`: `{"name":"새이름","department":"경영학과"}`. 바꿀 필드만 보내면 되고, 보내지 않은 필드는 그대로 둡니다. 둘 다 없으면 `400 EMPTY_PROFILE_UPDATE`, 공백만 보내면 `400 INVALID_INPUT`입니다. 이름 규칙은 회원가입과 같습니다(`DUPLICATE_NAME`, `RESERVED_NAME`).
+
+`ChangePasswordRequest`: `{"currentPassword":"password123","newPassword":"newPassword123"}`. `newPassword`는 8~64자입니다. 현재 비밀번호가 틀리면 `400 INVALID_PASSWORD`, 새 비밀번호가 현재와 같으면 `400 SAME_PASSWORD`입니다. 성공하면 **이 사용자의 기존 토큰이 모든 기기에서 무효**가 되고, 응답의 `accessToken`(새 토큰)으로 교체해야 계속 로그인 상태가 유지됩니다.
+
+회원 탈퇴는 본문에 현재 비밀번호 `{"password":"..."}`가 필요합니다. 틀리면 `400 INVALID_PASSWORD`, 진행 중인 세션의 발표자이면 `409 HOSTING_LIVE_SESSION`(세션을 먼저 종료)입니다. 탈퇴하면 이메일·이름·학과가 지워지고 모든 토큰이 무효가 됩니다. 같은 이메일로 다시 가입할 수 있습니다. 탈퇴한 사람이 만든 세션과 남긴 질문은 다른 참여자의 기록이라 삭제하지 않으며, 이름은 `탈퇴한 사용자#{userId}`로 표시됩니다.
+
+### 비밀번호 재설정 (로그인 불필요)
+
+1. `POST /users/auth/password-reset/request` `{"email":"alice@example.com"}` → 가입된 이메일이면 6자리 인증코드를 메일로 보냅니다. 가입 여부가 드러나지 않도록 **항상 200**을 반환합니다. 같은 이메일은 60초에 한 번만 발송합니다(그 사이 요청은 200이지만 무시). 메일 서버 오류는 `503 MAIL_SEND_FAILED`입니다.
+2. `POST /users/auth/password-reset/confirm` `{"email":"alice@example.com","code":"123456","newPassword":"newPassword123"}` → 성공하면 비밀번호가 바뀌고 기존 토큰이 모두 무효가 됩니다. 새 비밀번호로 다시 로그인하세요.
+
+코드는 10분 동안 유효하고 한 번만 쓸 수 있습니다. 5번 틀리면 폐기되므로 다시 요청해야 합니다. 코드가 틀리거나 만료되었거나 폐기되었으면 `400 INVALID_RESET_CODE`입니다. 코드와 사용자별 토큰 무효화 기록은 서버 메모리에 보관하므로 서버가 재시작되면 초기화됩니다.
 
 ## 3. 세션
 

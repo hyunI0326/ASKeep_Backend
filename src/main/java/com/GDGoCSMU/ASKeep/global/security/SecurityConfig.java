@@ -49,6 +49,9 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         // 회원가입 / 로그인은 누구나
                         .requestMatchers(HttpMethod.POST, "/api/v1/users/auth/signup", "/api/v1/users/auth/login").permitAll()
+                        // 비밀번호 재설정은 비밀번호를 잊은(로그인 못 하는) 사용자가 쓰므로 누구나
+                        .requestMatchers(HttpMethod.POST, "/api/v1/users/auth/password-reset/request",
+                                "/api/v1/users/auth/password-reset/confirm").permitAll()
                         .requestMatchers("/swagger-ui/**", "/v3/api-docs/**").permitAll()
                         // 웹소켓 연결(핸드셰이크)은 브라우저가 헤더를 못 붙이므로 열어 두고,
                         // 인증은 STOMP CONNECT 단계에서 StompAuthChannelInterceptor가 한다

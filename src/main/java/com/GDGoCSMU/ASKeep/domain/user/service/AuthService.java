@@ -40,7 +40,9 @@ public class AuthService {
         if (userRepository.existsByEmail(email)) {
             throw new BusinessException(ErrorCode.DUPLICATE_EMAIL);
         }
-        User user = new User(email, passwordEncoder.encode(request.password()), request.name().trim());
+        String name = request.name().trim();
+        UserService.validateNewName(name, userRepository);
+        User user = new User(email, passwordEncoder.encode(request.password()), name, request.department().trim());
         return UserResponse.from(userRepository.save(user));
     }
 

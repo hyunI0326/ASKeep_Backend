@@ -15,6 +15,8 @@ import java.util.UUID;
 @Component
 public class JwtProvider {
 
+    public static final String ISSUED_AT_MILLIS = "iat_ms";
+
     private final SecretKey key;
     private final long expirationMillis;
 
@@ -32,6 +34,8 @@ public class JwtProvider {
                 .id(UUID.randomUUID().toString())
                 .subject(String.valueOf(userId))
                 .claim("role", role)
+                // iat는 초 단위라서, 비밀번호 변경 직전 같은 초에 발급된 토큰도 구분할 수 있게 ms 단위 발급 시각을 따로 넣는다
+                .claim(ISSUED_AT_MILLIS, now.getTime())
                 .issuedAt(now)
                 .expiration(new Date(now.getTime() + expirationMillis))
                 .signWith(key)
