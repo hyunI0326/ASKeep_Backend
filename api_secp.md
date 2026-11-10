@@ -9,7 +9,9 @@
 - 회원가입과 로그인을 제외한 모든 API는 `Authorization: Bearer {accessToken}` 헤더가 필요합니다.
 - JSON 본문을 보내는 요청은 `Content-Type: application/json`을 사용합니다. 자료 업로드만 `multipart/form-data`를 사용합니다.
 - 액세스 토큰은 HS256 JWT이며 기본 만료 시간은 3,600초입니다. 만료되면 다시 로그인해야 합니다. 토큰 갱신 API는 구현되어 있지 않습니다.
-- 날짜·시간은 시간대 정보가 없는 ISO 8601 문자열입니다. 예: `2026-10-01T10:30:00`.
+- 날짜·시간은 시간대(오프셋)가 포함된 ISO 8601 문자열입니다. 예: `2026-10-01T10:30:00+09:00`. 응답은 항상 한국 시간(`+09:00`) 기준으로 내려갑니다.
+- 요청에 날짜를 보낼 때도 같은 형식(`+09:00` 또는 `Z`)을 권장합니다. 오프셋 없이 보내면(`2026-10-01T10:30:00`) 한국 시간으로 처리합니다. JavaScript에서는 `new Date(값)`으로 그대로 읽을 수 있습니다.
+- 형식이 잘못된 날짜(예: `"내일 2시"`)를 보내면 400 `INVALID_INPUT`입니다.
 - 경로의 ID(`sessionId`, `materialId`, `questionId`, `answerId`)는 정수입니다.
 
 ### 공통 응답
@@ -152,10 +154,10 @@
 
 | 기능 | 메서드·경로 | 요청 | 성공 |
 |---|---|---|---|
-| 생성 | `POST /sessions` | JSON: `title`(필수), `description`(선택) | 201, `SessionResponse` |
+| 생성 | `POST /sessions` | JSON: `title`(필수), `description`, `scheduledStartAt`, `scheduledEndAt`(선택) | 201, `SessionResponse` |
 | 목록 | `GET /sessions` | 선택 쿼리 `status` | 200, `SessionResponse[]` |
 | 상세 | `GET /sessions/{sessionId}` | 없음 | 200, `SessionResponse` |
-| 수정 | `PATCH /sessions/{sessionId}` | JSON: `title`, `description` 중 변경할 필드 | 200, `SessionResponse` |
+| 수정 | `PATCH /sessions/{sessionId}` | JSON: `title`, `description`, `scheduledStartAt`, `scheduledEndAt` 중 변경할 필드 | 200, `SessionResponse` |
 | 삭제 | `DELETE /sessions/{sessionId}` | 없음 | 200, 데이터 없음 |
 | 시작 | `POST /sessions/{sessionId}/start` | 없음 | 200, `SessionResponse` |
 | 종료 | `POST /sessions/{sessionId}/end` | 없음 | 200, `SessionResponse` |
@@ -167,10 +169,21 @@
 생성 요청 예시:
 
 ```json
-{"title":"1주차 발표","description":"질문을 받는 세션"}
+{"title":"1주차 발표","description":"질문을 받는 세션","scheduledStartAt":"2026-10-08T14:00:00+09:00","scheduledEndAt":"2026-10-08T15:30:00+09:00"}
 ```
 
 `title`은 공백만으로 구성할 수 없고 최대 100자입니다. 수정 요청은 보낸 필드만 변경합니다. `description:null`은 변경 없음으로 처리됩니다.
+
+`scheduledStartAt`, `scheduledEndAt`은 세션 진행 예정 일시(선택)입니다. 실제로 시작·종료한 시각인 `startedAt`, `endedAt`과는 별개입니다.
+
+| 상황 | 응답 |
+| --- | --- |
+| 예정 일시를 보내지 않음 | 201, 두 값 모두 `null` |
+| 종료 일시가 시작 일시보다 빠름 | 400 `INVALID_INPUT` |
+| 수정 시 한쪽만 보냄 | 보낸 값만 바뀌고, 다른 쪽은 기존 값과 비교해 검사 |
+| 종료된 세션의 예정 일시 수정 | 409 `SESSION_ALREADY_ENDED` |
+
+현재는 한 번 넣은 예정 일시를 `null`로 지우는 기능이 없습니다(`null`은 변경 없음으로 처리).
 
 `SessionResponse`(`data`):
 
@@ -183,6 +196,8 @@
   "presenterName": "앨리스",
   "entryCode": "ABC234",
   "status": "READY",
+  "scheduledStartAt": "2026-10-08T14:00:00+09:00",
+  "scheduledEndAt": "2026-10-08T15:30:00+09:00",
   "startedAt": null,
   "endedAt": null,
   "createdAt": "2026-10-01T10:30:00"

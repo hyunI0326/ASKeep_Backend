@@ -71,6 +71,7 @@ public class SessionService {
     public SessionResponse create(Long userId, SessionCreateRequest request) {
         User presenter = userService.getUser(userId);
         Session session = new Session(request.title().trim(), request.description(), presenter, newEntryCode());
+        session.changeSchedule(request.scheduledStartAt(), request.scheduledEndAt());
         return SessionResponse.from(sessionRepository.save(session));
     }
 
@@ -99,6 +100,13 @@ public class SessionService {
             session.changeTitle(request.title().trim());
         }
         if (request.description() != null) session.changeDescription(request.description());
+        if (request.scheduledStartAt() != null || request.scheduledEndAt() != null) {
+            LocalDateTime start = request.scheduledStartAt() != null
+                    ? request.scheduledStartAt() : session.getScheduledStartAt();
+            LocalDateTime end = request.scheduledEndAt() != null
+                    ? request.scheduledEndAt() : session.getScheduledEndAt();
+            session.changeSchedule(start, end);
+        }
         return SessionResponse.from(session);
     }
 
