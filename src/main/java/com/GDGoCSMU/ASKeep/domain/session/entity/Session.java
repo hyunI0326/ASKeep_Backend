@@ -41,6 +41,10 @@ public class Session {
     private LocalDateTime startedAt;
     private LocalDateTime endedAt;
 
+    /** 세션을 만들 때 정하는 예정 시작/종료 일시 (선택 입력이라 nullable) */
+    private LocalDateTime scheduledStartAt;
+    private LocalDateTime scheduledEndAt;
+
     @CreationTimestamp
     @Column(name = "create_at", updatable = false)
     private LocalDateTime createdAt;
@@ -92,6 +96,17 @@ public class Session {
         this.description = description;
     }
 
+        public void changeSchedule(LocalDateTime start, LocalDateTime end) {
+        if (status == SessionStatus.ENDED) {
+            throw new BusinessException(ErrorCode.SESSION_ALREADY_ENDED);
+        }
+        if (start != null && end != null && end.isBefore(start)) {
+            throw new IllegalArgumentException("예정 종료 일시는 시작 일시보다 빠를 수 없습니다.");
+        }
+        this.scheduledStartAt = start;
+        this.scheduledEndAt = end;
+    }
+
     public void start() {
         if (status != SessionStatus.READY) {
             throw new BusinessException(ErrorCode.SESSION_ALREADY_STARTED);
@@ -116,6 +131,8 @@ public class Session {
     public SessionStatus getStatus() { return status; }
     public LocalDateTime getStartedAt() { return startedAt; }
     public LocalDateTime getEndedAt() { return endedAt; }
+        public LocalDateTime getScheduledStartAt() { return scheduledStartAt; }
+    public LocalDateTime getScheduledEndAt() { return scheduledEndAt; }
     public LocalDateTime getCreatedAt() { return createdAt; }
     public LocalDateTime getUpdatedAt() { return updatedAt; }
 }
